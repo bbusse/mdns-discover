@@ -1,5 +1,5 @@
 # mdns-discover
-mDNS Service discovery
+mDNS Service Discovery
 
 ## Installation
 ```
@@ -11,13 +11,11 @@ Show help
 ```
 $ mdns-discover help
 ```
-Run
+Run with filter  
+Regular expressions are not supported  
+The service type without the domain needs to be an exact match
 ```
-$ mdns-discover
-```
-Run with filter, regular expressions are not supported
-```
-$ MDNS_SERVICE_FILTER="" mdns-discover
+$ MDNS_SERVICE_FILTER="_workstation._tcp" mdns-discover
 ```
 ## Build
 ```
@@ -26,6 +24,7 @@ $ cd mdns-discover
 $ go build
 ```
 ## Resources
-[mDNS Source: Wikipedia](https://en.wikipedia.org/wiki/Multicast_DNS)  
+[mDNS Wikipedia](https://en.wikipedia.org/wiki/Multicast_DNS)  
+[mDNS by Stuart Cheshire](http://www.multicastdns.org/)  
 [https://github.com/hashicorp/mdns](https://github.com/hashicorp/mdns)  
 [https://github.com/grandcat/zeroconf/](https://github.com/grandcat/zeroconf/)  
