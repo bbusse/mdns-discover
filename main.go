@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+    "embed"
     "fmt"
 	"log"
 	"os"
@@ -10,7 +11,16 @@ import (
 	"github.com/grandcat/zeroconf"
 )
 
-func discover(filter string) {
+
+var services = [...]string{"_http._tcp",
+                           "_raop._tcp",
+                           "_rdp._tcp",
+                           "_ssh._tcp",
+                           "_sftp-ssh._tcp"
+                           "_workstation._tcp",
+                           "_wled._tcp"}
+
+func discover(name string) {
 	resolver, err := zeroconf.NewResolver(nil)
 	if err != nil {
 		log.Fatalln("Failed to initialize resolver:", err.Error())
@@ -31,7 +41,7 @@ func discover(filter string) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
 	defer cancel()
-	err = resolver.Browse(ctx, filter, "local.", entries)
+	err = resolver.Browse(ctx, name, "local.", entries)
 	if err != nil {
 		log.Fatalln("Failed to browse:", err.Error())
 	}
@@ -52,11 +62,15 @@ func main() {
     version := "1"
 	filter := os.Getenv("MDNS_SERVICE_FILTER")
 
-    if "" == filter {
-        fmt.Printf("Discovery without a filter is not impemented yet\n")
+    if  len(os.Args) > 1 && "help" == os.Args[1] {
         help(progname, version)
-        os.Exit(1)
     }
 
-	discover(filter)
+    if "" != filter {
+	    discover(filter)
+    }
+
+    for _, filter := range services {
+	    discover(filter)
+    }
 }
