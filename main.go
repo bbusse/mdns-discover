@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-    "embed"
     "fmt"
 	"log"
 	"os"
@@ -11,14 +10,7 @@ import (
 	"github.com/grandcat/zeroconf"
 )
 
-
-var services = [...]string{"_http._tcp",
-                           "_raop._tcp",
-                           "_rdp._tcp",
-                           "_ssh._tcp",
-                           "_sftp-ssh._tcp"
-                           "_workstation._tcp",
-                           "_wled._tcp"}
+//go:generate go run gen/gen_services.go
 
 func discover(name string) {
 	resolver, err := zeroconf.NewResolver(nil)
