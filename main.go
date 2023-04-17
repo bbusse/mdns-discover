@@ -60,6 +60,7 @@ func main() {
 
     if "" != filter {
 	    discover(filter)
+        os.Exit(0)
     }
 
     for _, filter := range services {
