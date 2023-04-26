@@ -1,0 +1,79 @@
+name: Extract and release build artifact
+
+# Note: This event will only trigger a workflow run
+# if the workflow file is on the default branch
+# - So we need to run this workflow explicitly again
+# after the container are pushed to the registry
+#on:
+#  workflow_run:
+#    workflows: ["Build and release container"]
+#    branches: '**'
+#    types:
+#      - completed
+
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+    branches:
+      - '**'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+jobs:
+  extract-and-release:
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Extract build artifact - i386
+      uses: bbusse/actions-docker-extract@latest
+      id: extract_i386
+      with:
+        image: "ghcr.io/bbusse/mdns-discover-build:latest"
+        path: "tmp/mdns-discover/mdns-discover"
+        platform: linux/386
+
+    - name: Compress build artifact - i386
+      run: |
+        mv ${{ steps.extract_i386.outputs.destination }}/mdns-discover .
+        tar cJf mdns-discover-linux-i386-latest.tar.xz mdns-discover
+
+    - name: Extract build artifact from build container - amd64
+      uses: bbusse/actions-docker-extract@latest
+      id: extract_amd64
+      with:
+        image: "ghcr.io/bbusse/mdns-discover-build:latest"
+        path: "tmp/mdns-discover/mdns-discover"
+        platform: linux/386
+
+    - name: Compress build artifact - amd64
+      run: |
+        mv ${{ steps.extract_amd64.outputs.destination }}/mdns-discover .
+        tar cJf mdns-discover-linux-amd64-latest.tar.xz mdns-discover
+
+    - name: Extract build artifact from build container - arm64
+      uses: bbusse/actions-docker-extract@latest
+      id: extract_arm64
+      with:
+        image: "ghcr.io/bbusse/mdns-discover-build:latest"
+        path: "tmp/mdns-discover/mdns-discover"
+        platform: linux/arm64
+
+    - name: Compress build artifact - arm64
+      run: |
+        mv ${{ steps.extract_arm64.outputs.destination }}/mdns-discover .
+        tar cJf mdns-discover-linux-arm64-latest.tar.xz mdns-discover
+
+    - name: Release
+      uses: "marvinpinto/action-automatic-releases@latest"
+      with:
+        title: mdns-discover
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        prerelease: false
+        automatic_release_tag: "latest"
+        files: |
+          mdns-discover-linux-arm64-latest.tar.xz
+          mdns-discover-linux-amd64-latest.tar.xz
+          mdns-discover-linux-i386-latest.tar.xz
