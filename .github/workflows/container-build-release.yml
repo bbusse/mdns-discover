@@ -12,6 +12,27 @@ on:
   workflow_dispatch:
 
 jobs:
+  build-freebsd:
+    runs-on: macos-12
+    name: Build on FreeBSD
+    steps:
+      - uses: actions/checkout@v3.3.0
+      - name: Build on FreeBSD
+        uses: vmactions/freebsd-vm@v0.3.0
+        id: build
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y curl go
+
+          run: |
+            freebsd-version
+            pwd
+            ls -lah
+            go build
+            tar -cJvf mdns-discover-freebsd-amd64-latest.tar.xz mdns-discover
+            ls -lah
+
   build-and-release-container:
     runs-on: ubuntu-latest
     steps:
