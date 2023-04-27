@@ -1,4 +1,4 @@
-name: Build and release FreeBSD
+name: FreeBSD Build
 
 on:
   push:
@@ -14,7 +14,7 @@ on:
 jobs:
   build-freebsd:
     runs-on: macos-12
-    name: Build on FreeBSD
+    name: FreeBSD Build
     steps:
       - uses: actions/checkout@v3.3.0
       - name: FreeBSD Build
