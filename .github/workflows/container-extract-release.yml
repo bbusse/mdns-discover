@@ -71,6 +71,14 @@ jobs:
       with:
         name: mdns-discover-freebsd
 
+    - name: Wait for FreeBSD build
+      uses: lewagon/wait-on-check-action@v1.3.1
+      with:
+        ref: ${{ github.ref }}
+        check-name: 'FreeBSD Build'
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        wait-interval: 10
+
     - name: Release
       uses: "marvinpinto/action-automatic-releases@latest"
       with:
