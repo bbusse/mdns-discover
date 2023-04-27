@@ -77,7 +77,7 @@ jobs:
     - name: Download FreeBSD artifact
       uses: actions/download-artifact@v3
       with:
-        name: mdns-discover-freebsd
+        name: mdns-discover-freebsd-amd64-latest.tar.xz
 
     - name: Release
       uses: "marvinpinto/action-automatic-releases@latest"
@@ -87,6 +87,7 @@ jobs:
         prerelease: false
         automatic_release_tag: "latest"
         files: |
-          mdns-discover-linux-arm64-latest.tar.xz
+          mdns-discover-freebsd-amd64-latest.tar.xz
           mdns-discover-linux-amd64-latest.tar.xz
+          mdns-discover-linux-i386-latest.tar.xz
           mdns-discover-linux-i386-latest.tar.xz
