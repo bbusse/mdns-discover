@@ -66,11 +66,6 @@ jobs:
         mv ${{ steps.extract_arm64.outputs.destination }}/mdns-discover .
         tar cJf mdns-discover-linux-arm64-latest.tar.xz mdns-discover
 
-    - name: Download FreeBSD artifact
-      uses: actions/download-artifact@v3
-      with:
-        name: mdns-discover-freebsd
-
     - name: Wait for FreeBSD build
       uses: lewagon/wait-on-check-action@v1.3.1
       with:
@@ -78,6 +73,11 @@ jobs:
         check-name: 'FreeBSD Build'
         repo-token: ${{ secrets.GITHUB_TOKEN }}
         wait-interval: 10
+
+    - name: Download FreeBSD artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: mdns-discover-freebsd
 
     - name: Release
       uses: "marvinpinto/action-automatic-releases@latest"
