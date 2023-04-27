@@ -40,7 +40,7 @@ jobs:
         mv ${{ steps.extract_i386.outputs.destination }}/mdns-discover .
         tar cJf mdns-discover-linux-i386-latest.tar.xz mdns-discover
 
-    - name: Upload artifact
+    - name: Upload artifact - i386
       uses: actions/upload-artifact@v3
       with:
         name: mdns-discover-linux-i386-latest.tar.xz
@@ -59,7 +59,7 @@ jobs:
         mv ${{ steps.extract_amd64.outputs.destination }}/mdns-discover .
         tar cJf mdns-discover-linux-amd64-latest.tar.xz mdns-discover
 
-    - name: Upload artifact
+    - name: Upload artifact - amd64
       uses: actions/upload-artifact@v3
       with:
         name: mdns-discover-linux-amd64-latest.tar.xz
@@ -78,35 +78,8 @@ jobs:
         mv ${{ steps.extract_arm64.outputs.destination }}/mdns-discover .
         tar cJf mdns-discover-linux-arm64-latest.tar.xz mdns-discover
 
-    - name: Upload artifact
+    - name: Upload artifact - arm64
       uses: actions/upload-artifact@v3
       with:
         name: mdns-discover-linux-arm64-latest.tar.xz
         path: mdns-discover-linux-arm64-latest.tar.xz
-
-    - name: Wait for FreeBSD build
-      uses: lewagon/wait-on-check-action@v1.3.1
-      with:
-        ref: ${{ github.ref }}
-        check-name: 'FreeBSD Build'
-        repo-token: ${{ secrets.GITHUB_TOKEN }}
-        wait-interval: 10
-
-    - name: Download FreeBSD artifact
-      id: download-artifact
-      uses: dawidd6/action-download-artifact@v2
-      with:
-        workflow: freebsd-build.yml
-
-    - name: Release
-      uses: "marvinpinto/action-automatic-releases@latest"
-      with:
-        title: mdns-discover
-        repo_token: "${{ secrets.GITHUB_TOKEN }}"
-        prerelease: false
-        automatic_release_tag: "latest"
-        files: |
-          mdns-discover-freebsd-amd64-latest.tar.xz
-          mdns-discover-linux-amd64-latest.tar.xz
-          mdns-discover-linux-i386-latest.tar.xz
-          mdns-discover-linux-i386-latest.tar.xz
