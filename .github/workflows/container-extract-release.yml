@@ -40,6 +40,12 @@ jobs:
         mv ${{ steps.extract_i386.outputs.destination }}/mdns-discover .
         tar cJf mdns-discover-linux-i386-latest.tar.xz mdns-discover
 
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: mdns-discover-linux-i386-latest.tar.xz
+        path: mdns-discover-linux-i386-latest.tar.xz
+
     - name: Extract build artifact from build container - amd64
       uses: bbusse/actions-docker-extract@latest
       id: extract_amd64
@@ -53,6 +59,12 @@ jobs:
         mv ${{ steps.extract_amd64.outputs.destination }}/mdns-discover .
         tar cJf mdns-discover-linux-amd64-latest.tar.xz mdns-discover
 
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: mdns-discover-linux-amd64-latest.tar.xz
+        path: mdns-discover-linux-amd64-latest.tar.xz
+
     - name: Extract build artifact from build container - arm64
       uses: bbusse/actions-docker-extract@latest
       id: extract_arm64
@@ -65,6 +77,12 @@ jobs:
       run: |
         mv ${{ steps.extract_arm64.outputs.destination }}/mdns-discover .
         tar cJf mdns-discover-linux-arm64-latest.tar.xz mdns-discover
+
+    - name: Upload artifact
+      uses: actions/upload-artifact@v3
+      with:
+        name: mdns-discover-linux-arm64-latest.tar.xz
+        path: mdns-discover-linux-arm64-latest.tar.xz
 
     - name: Wait for FreeBSD build
       uses: lewagon/wait-on-check-action@v1.3.1
