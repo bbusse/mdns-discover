@@ -36,4 +36,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v3
         with:
+          name: mdns-discover-freebsd-amd64-latest.tar.xz
           path: mdns-discover-freebsd-amd64-latest.tar.xz
