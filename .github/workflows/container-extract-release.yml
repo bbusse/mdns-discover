@@ -78,7 +78,7 @@ jobs:
       id: download-artifact
       uses: dawidd6/action-download-artifact@v2
       with:
-        name: mdns-discover-freebsd-amd64-latest.tar.xz
+        workflow: freebsd-build.yml
 
     - name: Release
       uses: "marvinpinto/action-automatic-releases@latest"
