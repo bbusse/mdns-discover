@@ -27,6 +27,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
 
+    - name: Wait for container release
+      uses: lewagon/wait-on-check-action@v1.3.1
+      with:
+        ref: ${{ github.ref }}
+        check-name: 'Build and releas container'
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        wait-interval: 10
+
     - name: Extract build artifact - i386
       uses: bbusse/actions-docker-extract@latest
       id: extract_i386

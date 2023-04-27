@@ -35,13 +35,21 @@ jobs:
         repo-token: ${{ secrets.GITHUB_TOKEN }}
         wait-interval: 10
 
+    - name: Wait for Linux builds
+      uses: lewagon/wait-on-check-action@v1.3.1
+      with:
+        ref: ${{ github.ref }}
+        check-name: 'Build and release container'
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        wait-interval: 10
+
     - name: Download FreeBSD artifact
       id: download-freebsd-artifact
       uses: dawidd6/action-download-artifact@v2
       with:
         workflow: freebsd-build.yml
 
-    - name: Download linux artifacts
+    - name: Download Linux artifacts
       id: download-linux-artifacts
       uses: dawidd6/action-download-artifact@v2
       with:
