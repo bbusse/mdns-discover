@@ -56,6 +56,7 @@ func main() {
 
     if  len(os.Args) > 1 && "help" == os.Args[1] {
         help(progname, version)
+        os.Exit(0)
     }
 
     if "" != filter {
