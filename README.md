@@ -25,6 +25,8 @@ $ MDNS_SERVICE_FILTER="_workstation._tcp" mdns-discover
 ```
 # List of fields must be quoted and comma delimited
 $ mdns-discover show "hostname, address, text"
+or via ENVIRONMENT
+$ MDNS_FIELD_FILTER="hostname, address, text" mdns-discover
 ```
 
 ## Build
