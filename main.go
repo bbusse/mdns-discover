@@ -20,8 +20,7 @@ type Service struct {
 	text     string `json:"text"`
 }
 
-func discover(name string, output_filter []string) {
-	var services []Service
+func discover(services []Service, name string, output_filter []string) {
 	debug := false
 	nresults := 0
 	resolver, err := zeroconf.NewResolver(nil)
@@ -79,6 +78,8 @@ func discover(name string, output_filter []string) {
 		log.Fatalln("Failed to browse:", err.Error())
 	}
 
+	fmt.Printf("%v", entries)
+
 	<-ctx.Done()
 }
 
@@ -98,22 +99,24 @@ func help(name string, version string) {
 	fmt.Printf("  mdns-discover help                        - Show usage\n\n")
 	fmt.Printf("  MDNS_SERVICE_FILTER=\"_workstation._tcp\" \\\n")
 	fmt.Printf("  mdns-discover                             - Show filtered devices\n\n")
-	fmt.Printf("  mdns-discover show \"hostname, address\"    - Show specified attributes for all discovered devices\n\n")
+	fmt.Printf("  mdns-discover show-fields \"hostname, address\"    - Show specified attributes for all discovered devices\n\n")
 	fmt.Printf("  MDNS_SERVICE_FILTER=\"_workstation._tcp\" \\\n")
-	fmt.Printf("  mdns-discover show \"hostname, address\"    - Show specified attributes for filtered devices\n\n")
+	fmt.Printf("  mdns-discover show-fields \"hostname, address\"    - Show specified attributes for filtered devices\n\n")
 }
 
 func main() {
 	progname := os.Args[0]
 	version := "1"
 	service_filter := os.Getenv("MDNS_SERVICE_FILTER")
+	field_filter := os.Getenv("MDNS_FIELD_FILTER")
 	var output_filter []string
 
 	if len(os.Args) > 1 {
+		// Show help
 		if "help" == os.Args[1] {
 			help(progname, version)
 			os.Exit(0)
-		} else if "show" == os.Args[1] {
+		} else if "show-fields" == os.Args[1] {
 			if len(os.Args) == 2 {
 				fmt.Printf("Missing output filter. Please specify what to output with \"show\"\n")
 				help(progname, version)
@@ -125,15 +128,24 @@ func main() {
 					output_filter = append(output_filter, strings.TrimSpace(v))
 				}
 			}
+			// Check if env var is set, argument takes precedence
+		} else if field_filter != "" {
+			var output_filter_toks []string
+			output_filter_toks = strings.Split(field_filter, ",")
+			for _, v := range output_filter_toks {
+				output_filter = append(output_filter, strings.TrimSpace(v))
+			}
 		}
 	}
 
+	var discovered_services []Service
+
 	if "" != service_filter {
-		discover(service_filter, output_filter)
+		discover(discovered_services, service_filter, output_filter)
 		os.Exit(0)
 	}
 
 	for _, service_filter := range services {
-		discover(service_filter, output_filter)
+		discover(discovered_services, service_filter, output_filter)
 	}
 }
