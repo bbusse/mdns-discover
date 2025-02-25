@@ -7,16 +7,26 @@ $ go install github.com/bbusse/mdns-discover@latest
 ```
 
 ## Usage
-Show help
+### Show help
 ```
 $ mdns-discover help
 ```
-Run with filter  
+### Discover all devices
+```
+$ mdns-discover
+```
+### Discover specific service  
 Regular expressions are not supported  
 The service type without the domain needs to be an exact match
 ```
 $ MDNS_SERVICE_FILTER="_workstation._tcp" mdns-discover
 ```
+### Limit output to specified fields
+```
+# List of fields must be quoted and comma delimited
+$ mdns-discover show "hostname, address, text"
+```
+
 ## Build
 ```
 $ git clone https://github.com/bbusse/mdns-discover
