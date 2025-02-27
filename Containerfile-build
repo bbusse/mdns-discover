@@ -3,7 +3,7 @@ ARG TARGETARCH
 ARG TARGETOS
 FROM alpine:${IMAGE_VERSION}
 LABEL maintainer="Björn Busse <bj.rn@baerlin.eu>"
-LABEL org.opencontainers.image.source https://github.com/bbusse/mdns-discover-build
+LABEL org.opencontainers.image.source=https://github.com/bbusse/mdns-discover-build
 
 ARG TARGETARCH
 ARG TARGETOS
