@@ -1,0 +1,37 @@
+name: MacOS Build
+
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+    branches:
+      - '**'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-15
+    name: MacOS Build
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          pwd
+          ls -lah
+          /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
+          brew install golang
+          echo "export GOROOT=/usr/local/go" >> .bash_profile
+          echo "export GOPATH=$HOME/Documents/go" >> .bash_profile
+          echo "export PATH=$GOPATH/bin:$GOROOT/bin:$PATH" >> .bash_profile
+          go build
+          tar -cJvf mdns-discover-macos-arm64-latest.tar.xz mdns-discover
+          ls -lah
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdns-discover-macos-arm64-latest.tar.xz
+          path: mdns-discover-macos-arm64-latest.tar.xz
