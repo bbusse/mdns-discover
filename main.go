@@ -11,6 +11,8 @@ import (
 	"github.com/grandcat/zeroconf"
 )
 
+const defaultTimeout = 15 * time.Second
+
 //go:generate go run gen/gen_services.go
 
 type Service struct {
@@ -53,8 +55,8 @@ func discover(name string, output_filter []string) ([]Service, error) {
 	}
 
 	entries := make(chan *zeroconf.ServiceEntry)
-	// Allow overriding timeout via MDNS_TIMEOUT (e.g. 30s, 2m), default to 15s
-	timeout := 15 * time.Second
+	// Allow overriding timeout via MDNS_TIMEOUT (e.g. 30s, 2m), default to defaultTimeout
+	timeout := defaultTimeout
 	if tv := os.Getenv("MDNS_TIMEOUT"); tv != "" {
 		if d, err := time.ParseDuration(tv); err == nil {
 			timeout = d
