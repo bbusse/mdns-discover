@@ -46,27 +46,17 @@ var (
 	errNoServicesConfigured = fmt.Errorf("no built-in services configured")
 )
 
+// Maximum number of simultaneous discover operations (overridable)
 var maxConcurrentDiscover = 10
 
 func exit(code int) {
 	os.Exit(code)
 }
 
+// Fail prints an error message to stderr then exits with the provided code
 func fail(code int, format string, args ...any) {
 	fmt.Fprintf(os.Stderr, format, args...)
 	exit(code)
-}
-
-func failUsage(fs *flag.FlagSet, format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format, args...)
-	fs.Usage()
-	exit(exitUsage)
-}
-
-func failHelp(progname, version string, format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format, args...)
-	help(progname, version)
-	exit(exitUsage)
 }
 
 // OutputMode represents how results should be emitted
@@ -79,14 +69,12 @@ const (
 
 //go:generate go run gen/gen_services.go
 
-func discover(name string, outputFields []string, printResults bool, timeout time.Duration, debug bool) ([]Service, error) {
+func discover(name string, outputFields []string, selectedFields map[string]struct{}, printResults bool, timeout time.Duration, debug bool) ([]Service, error) {
 	nresults := 0
 	resolver, err := zeroconf.NewResolver(nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errResolverInit, err)
 	}
-
-	outputFields, selectedFields := normalizeOutputFields(outputFields)
 
 	if debug && printResults {
 		fmt.Printf("Showing: ")
@@ -184,7 +172,7 @@ func discoverAll(serviceNames []string, outputFields []string, selectedFields ma
 			sem <- struct{}{}
 			defer wg.Done()
 			defer func() { <-sem }()
-			res, err := discover(svc, outputFields, false, timeout, debug)
+			res, err := discover(svc, outputFields, selectedFields, false, timeout, debug)
 			ch <- batch{services: res, err: err, name: svc}
 		}()
 	}
@@ -444,6 +432,7 @@ func main() {
 	fs.StringVar(&timeoutFlag, "timeout", "", "Discovery timeout (e.g. 10s, 30s, 1m) overrides env MDNS_TIMEOUT")
 
 	if err := fs.Parse(os.Args[1:]); err != nil {
+		// flag package already prints an error; show concise usage
 		fs.Usage()
 		exit(exitUsage)
 	}
@@ -472,12 +461,16 @@ func main() {
 		outputMode = OutputJSON
 		printResults = false
 	default:
-		failUsage(fs, "Unknown --output value: %s (expected text or json)\n", outputModeStr)
+		fmt.Fprintf(os.Stderr, "Unknown --output value: %s (expected text or json)\n", outputModeStr)
+		fs.Usage()
+		exit(exitUsage)
 	}
 	if concurrency > 0 {
 		maxConcurrentDiscover = concurrency
 	} else {
-		failUsage(fs, "Invalid --concurrency value: %d (must be > 0)\n", concurrency)
+		fmt.Fprintf(os.Stderr, "Invalid --concurrency value: %d (must be > 0)\n", concurrency)
+		fs.Usage()
+		exit(exitUsage)
 	}
 
 	// If timeout flag provided, set environment override chain by exporting value into local var used later
@@ -487,14 +480,16 @@ func main() {
 		if d, err := time.ParseDuration(envTO); err == nil {
 			effectiveTimeout = d
 		} else {
-			fmt.Fprintf(os.Stderr, "warn: invalid MDNS_TIMEOUT '%s' (using default %s)\n", envTO, effectiveTimeout)
+			fmt.Fprintf(os.Stderr, "warning: invalid MDNS_TIMEOUT '%s' (using default %s)\n", envTO, effectiveTimeout)
 		}
 	}
 	if timeoutFlag != "" {
 		if d, err := time.ParseDuration(timeoutFlag); err == nil {
 			effectiveTimeout = d
 		} else {
-			failUsage(fs, "Invalid --timeout value: %s\n", timeoutFlag)
+			fmt.Fprintf(os.Stderr, "Invalid --timeout value: %s\n", timeoutFlag)
+			fs.Usage()
+			exit(exitUsage)
 		}
 	}
 
@@ -510,16 +505,23 @@ func main() {
 			exit(exitOK)
 		} else if args[0] == "show-fields" {
 			if len(args) == 1 {
-				failHelp(progname, version, "Missing output filter. Please specify what to output with \"show-fields\"\n")
+				fmt.Fprintf(os.Stderr, "Missing output filter. Please specify what to output with \"show-fields\"\n")
+				help(progname, version)
+				exit(exitUsage)
 			}
 			for _, v := range strings.Split(args[1], ",") {
 				outputFields = append(outputFields, strings.TrimSpace(v))
 			}
 			if len(args) > 2 {
-				failHelp(progname, version, "Unexpected extra arguments: %v\n", args[2:])
+				fmt.Fprintf(os.Stderr, "Unexpected extra arguments: %v\n", args[2:])
+				help(progname, version)
+				exit(exitUsage)
 			}
 		} else {
-			failHelp(progname, version, "Unknown command: %s\n", args[0])
+			// Unknown subcommand
+			fmt.Fprintf(os.Stderr, "Unknown command: %s\n", args[0])
+			help(progname, version)
+			exit(exitUsage)
 		}
 	}
 
@@ -530,12 +532,12 @@ func main() {
 		}
 	}
 
-	// Normalize output fields once (used for multi-service path)
+	// Normalize fields once before discovery (replaces per-call normalization)
 	outputFields, selectedFields := normalizeOutputFields(outputFields)
 
 	var discovered []Service
 	if serviceFilter != "" {
-		res, err := discover(serviceFilter, outputFields, printResults, effectiveTimeout, debug)
+		res, err := discover(serviceFilter, outputFields, selectedFields, printResults, effectiveTimeout, debug)
 		if err != nil {
 			code := exitErr
 			if errors.Is(err, errResolverInit) {
