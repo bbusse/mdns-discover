@@ -40,9 +40,10 @@ const (
 
 // Sentinel errors for classification
 var (
-	errResolverInit = fmt.Errorf("resolver init failed")
-	errBrowseFailed = fmt.Errorf("browse failed")
-	errTimedOutZero = fmt.Errorf("timeout no results")
+	errResolverInit         = fmt.Errorf("resolver init failed")
+	errBrowseFailed         = fmt.Errorf("browse failed")
+	errTimedOutZero         = fmt.Errorf("timeout no results")
+	errNoServicesConfigured = fmt.Errorf("no built-in services configured")
 )
 
 // Maximum number of simultaneous discover operations (overridable)
@@ -62,11 +63,16 @@ const (
 
 //go:generate go run gen/gen_services.go
 
-func discover(name string, outputFields []string, printResults bool, timeout time.Duration) ([]Service, error) {
-	debug := false
-	if os.Getenv("MDNS_DEBUG") == "1" || strings.ToLower(os.Getenv("MDNS_DEBUG")) == "true" {
-		debug = true
-	}
+// DiscoveryStats holds aggregate information about the multi-service discovery run
+type DiscoveryStats struct {
+	SuppressedTimeouts int
+	Errors             int
+	Attempts           int
+	ServiceTypeCounts  map[string]int
+	Warnings           []string
+}
+
+func discover(name string, outputFields []string, printResults bool, timeout time.Duration, debug bool) ([]Service, error) {
 	nresults := 0
 	resolver, err := zeroconf.NewResolver(nil)
 	if err != nil {
@@ -146,6 +152,176 @@ func discover(name string, outputFields []string, printResults bool, timeout tim
 					collected[len(collected)-1].TxtMap = txtMap
 				}
 			}
+		}
+	}
+}
+
+// DiscoverAll concurrently discovers across multiple service names
+func discoverAll(serviceNames []string, outputFields []string, printResults bool, outputMode OutputMode, timeout time.Duration, debug bool) ([]Service, DiscoveryStats, error) {
+	// Guard empty services list
+	if len(serviceNames) == 0 {
+		return nil, DiscoveryStats{}, errNoServicesConfigured
+	}
+	type batch struct {
+		services []Service
+		err      error
+		name     string
+	}
+	ch := make(chan batch, len(serviceNames))
+	wg := sync.WaitGroup{}
+	sem := make(chan struct{}, maxConcurrentDiscover)
+	for _, s := range serviceNames {
+		svc := s
+		wg.Add(1)
+		go func() {
+			sem <- struct{}{}
+			defer wg.Done()
+			defer func() { <-sem }()
+			res, err := discover(svc, outputFields, false, timeout, debug)
+			ch <- batch{services: res, err: err, name: svc}
+		}()
+	}
+	go func() { wg.Wait(); close(ch) }()
+	seen := make(map[string]struct{})
+	count := 0
+	var selectedFields map[string]struct{}
+	outputFields, selectedFields = normalizeOutputFields(outputFields)
+	var discovered []Service
+	stats := DiscoveryStats{ServiceTypeCounts: make(map[string]int)}
+	stats.Attempts = len(serviceNames)
+	for b := range ch {
+		if b.err != nil {
+			if errors.Is(b.err, errTimedOutZero) && !debug {
+				stats.SuppressedTimeouts++
+				stats.Warnings = append(stats.Warnings, fmt.Sprintf("discover %s: %v (suppressed)", b.name, b.err))
+				continue
+			}
+			stats.Errors++
+			msg := fmt.Sprintf("discover %s: %v", b.name, b.err)
+			stats.Warnings = append(stats.Warnings, msg)
+			fmt.Fprintf(os.Stderr, "warn: %s\n", msg)
+			continue
+		}
+		for _, srv := range b.services {
+			key := buildKey(srv.Hostname, srv.Address, srv.Port)
+			if _, ok := seen[key]; ok {
+				continue
+			}
+			seen[key] = struct{}{}
+			count++
+			if printResults && outputMode == OutputText {
+				line := buildOutputLine(selectedFields, count, b.name, srv.Hostname, srv.Address, srv.Port, srv.Text)
+				fmt.Println(line)
+			}
+			srv.ServiceType = b.name
+			stats.ServiceTypeCounts[b.name]++
+			discovered = append(discovered, srv)
+		}
+	}
+	return discovered, stats, nil
+}
+
+// PrintSummary outputs a scan summary
+func printSummary(discovered []Service, start time.Time, enabled bool, stats DiscoveryStats, color bool) {
+	if !enabled {
+		return
+	}
+	elapsed := time.Since(start).Truncate(time.Millisecond)
+	// ANSI color codes (only used when color=true)
+	reset := ""
+	bold := ""
+	green := ""
+	yellow := ""
+	red := ""
+	if color {
+		reset = "\033[0m"
+		bold = "\033[1m"
+		green = "\033[32m"
+		yellow = "\033[33m"
+		red = "\033[31m"
+	}
+	if len(discovered) == 0 {
+		msg := fmt.Sprintf("Summary: Completed in %s — No services found", elapsed)
+		if stats.SuppressedTimeouts > 0 {
+			msg += fmt.Sprintf(" (%d suppressed timeouts)", stats.SuppressedTimeouts)
+		}
+		fmt.Fprintf(os.Stderr, "%s%s%s\n", bold, msg, reset)
+		return
+	}
+	unique := make(map[string]struct{})
+	for _, d := range discovered {
+		if d.ServiceType != "" {
+			unique[d.ServiceType] = struct{}{}
+		}
+	}
+	us := len(unique)
+	inst := len(discovered)
+	elapsedSec := time.Since(start).Seconds()
+	rate := 0.0
+	if elapsedSec > 0 {
+		rate = float64(inst) / elapsedSec
+	}
+	svcWord := "service types"
+	if us == 1 {
+		svcWord = "service type"
+	}
+	instWord := "instances"
+	if inst == 1 {
+		instWord = "instance"
+	}
+	usStr := fmt.Sprintf("%d %s", us, svcWord)
+	instStr := fmt.Sprintf("%d %s", inst, instWord)
+	if color {
+		usStr = green + usStr + reset
+		instStr = green + instStr + reset
+	}
+	extras := []string{fmt.Sprintf("%.2f inst/s", rate)}
+	if stats.SuppressedTimeouts > 0 {
+		st := fmt.Sprintf("%d suppressed timeouts", stats.SuppressedTimeouts)
+		if color {
+			st = yellow + st + reset
+		}
+		extras = append(extras, st)
+	}
+	if stats.Errors > 0 {
+		er := fmt.Sprintf("%d errors", stats.Errors)
+		if color {
+			er = red + er + reset
+		}
+		extras = append(extras, er)
+	}
+	extraStr := ""
+	if len(extras) > 0 {
+		extraStr = " (" + strings.Join(extras, ", ") + ")"
+	}
+	fmt.Fprintf(os.Stderr, "%sSummary:%s Completed in %s — %s, %s%s\n", bold, reset, elapsed, usStr, instStr, extraStr)
+
+	// Top service types display (sorted by count desc)
+	if len(stats.ServiceTypeCounts) > 0 {
+		type kv struct {
+			k string
+			v int
+		}
+		pairs := make([]kv, 0, len(stats.ServiceTypeCounts))
+		for k, v := range stats.ServiceTypeCounts {
+			pairs = append(pairs, kv{k, v})
+		}
+		sort.Slice(pairs, func(i, j int) bool {
+			if pairs[i].v == pairs[j].v {
+				return pairs[i].k < pairs[j].k
+			}
+			return pairs[i].v > pairs[j].v
+		})
+		fmt.Fprintf(os.Stderr, "%sTop services:%s\n", bold, reset)
+		for i := 0; i < len(pairs); i++ {
+			name := pairs[i].k
+			cnt := pairs[i].v
+			pct := float64(cnt) / float64(inst) * 100
+			line := fmt.Sprintf("  %s: %d (%.1f%%)", name, cnt, pct)
+			if color {
+				line = green + line + reset
+			}
+			fmt.Fprintln(os.Stderr, line)
 		}
 	}
 }
@@ -243,6 +419,7 @@ func generateManPage(name, version string) string {
 	b.WriteString(".Op Fl -output Ns =text|json\n")
 	b.WriteString(".Op Fl -timeout Ns =30s\n")
 	b.WriteString(".Op Fl -concurrency Ar n\n")
+	b.WriteString(".Op Fl -debug\n")
 	b.WriteString(".Op Fl h | Fl -help | Fl -man\n")
 	b.WriteString(".Op Ar subcommand\n")
 	b.WriteString(".Sh DESCRIPTION\n")
@@ -316,6 +493,10 @@ func main() {
 	version := "1"
 	serviceFilter := os.Getenv("MDNS_SERVICE_FILTER")
 	fieldFilter := os.Getenv("MDNS_FIELD_FILTER")
+	debug := false
+	if os.Getenv("MDNS_DEBUG") == "1" || strings.ToLower(os.Getenv("MDNS_DEBUG")) == "true" {
+		debug = true
+	}
 	var outputFields []string
 	outputMode := OutputText
 	printResults := true
@@ -331,6 +512,9 @@ func main() {
 	var outputModeStr string
 	var wantHelp bool
 	var wantMan bool
+	var debugFlag bool
+	var noColorFlag bool
+	var summaryFlag bool
 	var concurrency int
 	var timeoutFlag string
 	var effectiveTimeout time.Duration
@@ -344,6 +528,9 @@ func main() {
 	fs.BoolVar(&wantHelp, "h", false, "Show help and exit")
 	fs.BoolVar(&wantHelp, "help", false, "Show help and exit")
 	fs.BoolVar(&wantMan, "man", false, "Output man page (mdoc) to stdout and exit")
+	fs.BoolVar(&debugFlag, "debug", false, "Enable verbose debug output (overrides MDNS_DEBUG env)")
+	fs.BoolVar(&summaryFlag, "summary", false, "Print summary (show all service types with counts)")
+	fs.BoolVar(&noColorFlag, "no-color", false, "Disable ANSI color in summary output")
 	fs.IntVar(&concurrency, "concurrency", defaultConcurrency, "Simultaneous discovery goroutines (env MDNS_CONCURRENCY)")
 	fs.StringVar(&timeoutFlag, "timeout", "", "Discovery timeout (e.g. 10s, 30s, 1m) overrides env MDNS_TIMEOUT")
 
@@ -361,6 +548,15 @@ func main() {
 		fmt.Print(generateManPage(progname, version))
 		exit(exitOK)
 	}
+
+	// Apply debug flag override
+	if debugFlag {
+		debug = true
+	}
+
+	// summaryFlag already indicates enabling; we now always list all service types when enabled
+
+	startTime := time.Now()
 
 	// Apply parsed flag values
 	switch strings.ToLower(strings.TrimSpace(outputModeStr)) {
@@ -442,8 +638,9 @@ func main() {
 	}
 
 	var discovered []Service
+	stats := DiscoveryStats{}
 	if serviceFilter != "" {
-		res, err := discover(serviceFilter, outputFields, printResults, effectiveTimeout)
+		res, err := discover(serviceFilter, outputFields, printResults, effectiveTimeout, debug)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: discover %s: %v\n", serviceFilter, err)
 			// Classify exit code
@@ -459,59 +656,58 @@ func main() {
 		}
 		discovered = append(discovered, res...)
 	} else {
-		type batch struct {
-			services []Service
-			err      error
-			name     string
-		}
-		if len(services) == 0 {
-
-			fmt.Fprintln(os.Stderr, "No built-in services available (services list empty) — rebuild may be required")
-			exit(exitUsage)
-		}
-		ch := make(chan batch, len(services))
-		wg := sync.WaitGroup{}
-		sem := make(chan struct{}, maxConcurrentDiscover)
-		for _, s := range services {
-			svc := s
-			wg.Add(1)
-			go func() {
-				sem <- struct{}{}
-				defer wg.Done()
-				defer func() { <-sem }()
-				res, err := discover(svc, outputFields, false, effectiveTimeout)
-				ch <- batch{services: res, err: err, name: svc}
-			}()
-		}
-		go func() { wg.Wait(); close(ch) }()
-
-		seen := make(map[string]struct{})
-		count := 0
-		var selectedFields map[string]struct{}
-		outputFields, selectedFields = normalizeOutputFields(outputFields)
-		for b := range ch {
-			if b.err != nil {
-				fmt.Fprintf(os.Stderr, "warn: discover %s: %v\n", b.name, b.err)
-				continue
+		res, st, err := discoverAll(services[:], outputFields, printResults, outputMode, effectiveTimeout, debug)
+		if err != nil {
+			if errors.Is(err, errNoServicesConfigured) {
+				fmt.Fprintln(os.Stderr, "No built-in services available (services list empty) — rebuild may be required")
+				exit(exitUsage)
 			}
-			for _, srv := range b.services {
-				key := buildKey(srv.Hostname, srv.Address, srv.Port)
-				if _, ok := seen[key]; ok {
-					continue
-				}
-				seen[key] = struct{}{}
-				count++
-				if printResults && outputMode == OutputText {
-					line := buildOutputLine(selectedFields, count, b.name, srv.Hostname, srv.Address, srv.Port, srv.Text)
-					fmt.Println(line)
-				}
-				srv.ServiceType = b.name
-				discovered = append(discovered, srv)
-			}
+			fmt.Fprintf(os.Stderr, "error: multi-discover: %v\n", err)
+			exit(exitErr)
 		}
+		discovered = append(discovered, res...)
+		stats = st
 	}
 
 	if outputMode == OutputJSON {
+		if summaryFlag {
+			elapsedDur := time.Since(startTime).Truncate(time.Millisecond)
+			unique := make(map[string]struct{})
+			for _, d := range discovered {
+				if d.ServiceType != "" {
+					unique[d.ServiceType] = struct{}{}
+				}
+			}
+			elapsedSec := time.Since(startTime).Seconds()
+			rate := 0.0
+			if elapsedSec > 0 {
+				rate = float64(len(discovered)) / elapsedSec
+			}
+			payload := struct {
+				Results []Service `json:"results"`
+				Summary struct {
+					Elapsed       string  `json:"elapsed"`
+					ServiceTypes  int     `json:"service_types"`
+					Instances     int     `json:"instances"`
+					InstancesPerS float64 `json:"instances_per_second"`
+					SuppressedTO  int     `json:"suppressed_timeouts"`
+					Errors        int     `json:"errors"`
+				} `json:"summary"`
+			}{Results: discovered}
+			payload.Summary.Elapsed = elapsedDur.String()
+			payload.Summary.ServiceTypes = len(unique)
+			payload.Summary.Instances = len(discovered)
+			payload.Summary.InstancesPerS = rate
+			payload.Summary.SuppressedTO = stats.SuppressedTimeouts
+			payload.Summary.Errors = stats.Errors
+			data, err := json.MarshalIndent(payload, "", "  ")
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: marshal json: %v\n", err)
+				exit(exitErr)
+			}
+			fmt.Println(string(data))
+			return
+		}
 		data, err := json.MarshalIndent(discovered, "", "  ")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: marshal json: %v\n", err)
@@ -521,5 +717,17 @@ func main() {
 		return
 	} else if len(discovered) == 0 {
 		fmt.Fprintln(os.Stderr, "No services discovered (consider adjusting MDNS_TIMEOUT or filters)")
+		// Color detection for TTY
+		color := false
+		// Simple TTY check via Stat mode (fallback without x/term)
+		if fi, err := os.Stderr.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) != 0 {
+			color = true
+		}
+		printSummary(discovered, startTime, summaryFlag, stats, color && !noColorFlag)
 	}
+	color := false
+	if fi, err := os.Stderr.Stat(); err == nil && (fi.Mode()&os.ModeCharDevice) != 0 {
+		color = true
+	}
+	printSummary(discovered, startTime, summaryFlag, stats, color && !noColorFlag)
 }

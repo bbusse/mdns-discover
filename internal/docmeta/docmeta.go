@@ -35,6 +35,9 @@ var flagInfos = []FlagInfo{
 	{Name: "output", ValueSyntax: "=text|json", Default: "text", Env: "", Description: "Output format"},
 	{Name: "timeout", ValueSyntax: "=30s", Default: "15s", Env: "MDNS_TIMEOUT", Description: "Discovery timeout"},
 	{Name: "concurrency", ValueSyntax: "<n>", Default: "10", Env: "MDNS_CONCURRENCY", Description: "Simultaneous lookups"},
+	{Name: "debug", ValueSyntax: "", Default: "false", Env: "MDNS_DEBUG", Description: "Verbose debug output"},
+	{Name: "summary", ValueSyntax: "", Default: "false", Env: "", Description: "Print summary (show all service types with counts)"},
+	{Name: "no-color", ValueSyntax: "", Default: "false", Env: "", Description: "Disable ANSI color in summary"},
 }
 
 var envInfos = []EnvInfo{
