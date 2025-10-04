@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +19,9 @@ const (
 	exitErr   = 1
 	exitUsage = 2
 )
+
+// Maximum number of simultaneous discover operations (overridable)
+var maxConcurrentDiscover = 10
 
 func exit(code int) {
 	os.Exit(code)
@@ -205,7 +209,8 @@ func help(name string, version string) {
 	fmt.Printf("    MDNS_TIMEOUT          - Duration (e.g. 10s, 30s, 1m)\n")
 	fmt.Printf("    MDNS_DEBUG            - Set to 1 / true for verbose discovery debug\n\n")
 	fmt.Printf("  Flags:\n")
-	fmt.Printf("    --output=text|json    - Select output format (default text)\n\n")
+	fmt.Printf("    --output=text|json    - Select output format (default text)\n")
+	fmt.Printf("    --concurrency <n>     - Limit simultaneous discovery goroutines (env: MDNS_CONCURRENCY)\n\n")
 }
 
 func main() {
@@ -216,6 +221,13 @@ func main() {
 	var outputFields []string
 	outputMode := OutputText
 	printResults := true
+
+	// Optional concurrency override via environment variable
+	if v := os.Getenv("MDNS_CONCURRENCY"); v != "" {
+		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
+			maxConcurrentDiscover = n
+		}
+	}
 
 	// Minimal flag scan for --output[=]<mode>
 	filteredArgs := []string{os.Args[0]}
@@ -249,6 +261,27 @@ func main() {
 			default:
 				fmt.Fprintf(os.Stderr, "Unknown output mode: %s (expected text or json)\n", mode)
 				help(progname, version)
+				exit(exitUsage)
+			}
+			continue
+		} else if strings.HasPrefix(a, "--concurrency") {
+			val := ""
+			if a == "--concurrency" {
+				if i+1 < len(os.Args) {
+					val = os.Args[i+1]
+					i++
+				} else {
+					fmt.Fprintf(os.Stderr, "--concurrency flag requires a value (positive integer)\n")
+					exit(exitUsage)
+				}
+			} else if strings.HasPrefix(a, "--concurrency=") {
+				val = strings.TrimPrefix(a, "--concurrency=")
+			}
+			val = strings.TrimSpace(val)
+			if n, err := strconv.Atoi(val); err == nil && n > 0 {
+				maxConcurrentDiscover = n
+			} else {
+				fmt.Fprintf(os.Stderr, "Invalid --concurrency value: %s\n", val)
 				exit(exitUsage)
 			}
 			continue
@@ -307,11 +340,14 @@ func main() {
 		}
 		ch := make(chan batch, len(services))
 		wg := sync.WaitGroup{}
+		sem := make(chan struct{}, maxConcurrentDiscover)
 		for _, s := range services {
 			svc := s
 			wg.Add(1)
 			go func() {
+				sem <- struct{}{}
 				defer wg.Done()
+				defer func() { <-sem }()
 				res, err := discover(svc, outputFields, false)
 				ch <- batch{services: res, err: err, name: svc}
 			}()
