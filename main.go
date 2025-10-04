@@ -417,10 +417,11 @@ func generateManPage(name, version string) string {
 	b.WriteString(".Sh SYNOPSIS\n")
 	b.WriteString(".Nm " + name + "\n")
 	b.WriteString(".Op Fl -output Ns =text|json\n")
-	b.WriteString(".Op Fl -timeout Ns =30s\n")
-	b.WriteString(".Op Fl -concurrency Ar n\n")
-	b.WriteString(".Op Fl -debug\n")
-	b.WriteString(".Op Fl h | Fl -help | Fl -man\n")
+	// Long options rendered with Cm; short -h remains Fl
+	b.WriteString(".Op Cm --timeout=30s\n")
+	b.WriteString(".Op Cm --concurrency Ar n\n")
+	b.WriteString(".Op Cm --debug\n")
+	b.WriteString(".Op Fl h | Cm --help | Cm --man\n")
 	b.WriteString(".Op Ar subcommand\n")
 	b.WriteString(".Sh DESCRIPTION\n")
 	b.WriteString(".Nm performs multicast DNS (mDNS / DNS-SD) discovery across a curated list of service types or an optionally restricted single service. Results can be emitted as plain text lines or a JSON array.\n")
@@ -431,7 +432,8 @@ func generateManPage(name, version string) string {
 	sort.Slice(finfos, func(i, j int) bool { return finfos[i].Name < finfos[j].Name })
 	for _, f := range finfos {
 		syn := "--" + f.Name + f.ValueSyntax
-		b.WriteString(".It Fl " + syn + "\n")
+		// Use Cm for long (--) options instead of Fl which is for short flags
+		b.WriteString(".It Cm " + syn + "\n")
 		parts := []string{f.Description}
 		if f.Default != "" {
 			parts = append(parts, "default: "+f.Default)
