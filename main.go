@@ -164,7 +164,7 @@ func discover(name string, outputFields []string, printResults bool, timeout tim
 }
 
 // DiscoverAll concurrently discovers across multiple service names
-func discoverAll(serviceNames []string, outputFields []string, printResults bool, outputMode OutputMode, timeout time.Duration, debug bool) ([]Service, error) {
+func discoverAll(serviceNames []string, outputFields []string, selectedFields map[string]struct{}, printResults bool, outputMode OutputMode, timeout time.Duration, debug bool) ([]Service, error) {
 	// Guard empty services list
 	if len(serviceNames) == 0 {
 		return nil, errNoServicesConfigured
@@ -191,8 +191,6 @@ func discoverAll(serviceNames []string, outputFields []string, printResults bool
 	go func() { wg.Wait(); close(ch) }()
 	seen := make(map[string]struct{})
 	count := 0
-	var selectedFields map[string]struct{}
-	outputFields, selectedFields = normalizeOutputFields(outputFields)
 	var discovered []Service
 	for b := range ch {
 		if b.err != nil {
@@ -532,6 +530,9 @@ func main() {
 		}
 	}
 
+	// Normalize output fields once (used for multi-service path)
+	outputFields, selectedFields := normalizeOutputFields(outputFields)
+
 	var discovered []Service
 	if serviceFilter != "" {
 		res, err := discover(serviceFilter, outputFields, printResults, effectiveTimeout, debug)
@@ -548,7 +549,7 @@ func main() {
 		}
 		discovered = append(discovered, res...)
 	} else {
-		res, err := discoverAll(services[:], outputFields, printResults, outputMode, effectiveTimeout, debug)
+		res, err := discoverAll(services[:], outputFields, selectedFields, printResults, outputMode, effectiveTimeout, debug)
 		if err != nil {
 			if errors.Is(err, errNoServicesConfigured) {
 				fail(exitUsage, "No built-in services available (services list empty) — rebuild may be required\n")
