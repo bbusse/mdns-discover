@@ -41,7 +41,14 @@ func discover(name string, output_filter []string) ([]Service, error) {
 	}
 
 	entries := make(chan *zeroconf.ServiceEntry)
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
+	// Allow overriding timeout via MDNS_TIMEOUT (e.g. 30s, 2m), default to 15s
+	timeout := 15 * time.Second
+	if tv := os.Getenv("MDNS_TIMEOUT"); tv != "" {
+		if d, err := time.ParseDuration(tv); err == nil {
+			timeout = d
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	if err = resolver.Browse(ctx, name, "local.", entries); err != nil {
