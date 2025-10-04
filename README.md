@@ -21,7 +21,7 @@ $ make install PREFIX=$HOME/.local
 
 After install, validate:
 ```
-$ which mdns-discover
+$ mdns-discover
 $ man mdns-discover
 ```
 
@@ -30,11 +30,11 @@ $ man mdns-discover
 ```
 $ mdns-discover help
 ```
-### Discover all services
+### Discover all known services
 ```
 $ mdns-discover
 ```
-### Specify a timeout (Overrides MDNS_TIMEOUT env)
+### Specify a timeout
 ```
 $ mdns-discover --timeout=30s
 ```
@@ -61,8 +61,8 @@ When using `--output=json` the tool prints a single JSON array. Each element (ad
 {
 	"service": "_workstation._tcp",
 	"hostname": "Device.local.",
-	"address": "192.168.1.23",
-	"port": 12345,
+	"address": "10.0.1.23",
+	"port": 2342,
 	"text": "kv1=v1;kv2=v2",
 	"txtMap": { "kv1": "v1", "kv2": "v2" }
 }
@@ -73,8 +73,8 @@ $ mdns-discover --output=json
 [
 	{
 		"service": "_raop._tcp",
-		"hostname": "MyDevice.local.",
-		"address": "192.168.1.23",
+		"hostname": "Device.local.",
+		"address": "10.0.1.23",
 		"port": 7000,
 		"text": "fv=p20.1",
 		"txtMap": { "fv": "p20.1" }
