@@ -19,6 +19,10 @@ const (
 	exitUsage = 2
 )
 
+func exit(code int) {
+	os.Exit(code)
+}
+
 // OutputMode represents how results should be emitted
 type OutputMode int
 
@@ -36,6 +40,44 @@ type Service struct {
 	Text     string `json:"text"`
 }
 
+// NormalizeOutputFields applies defaults if none provided and returns the
+// Final slice plus a set for membership tests
+func normalizeOutputFields(fields []string) ([]string, map[string]struct{}) {
+	if len(fields) == 0 {
+		fields = append(fields, "count", "hostname", "address", "port", "text")
+	}
+	selected := make(map[string]struct{}, len(fields))
+	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		// Skip empty pieces
+		if f == "" {
+			continue
+		}
+		// Skip duplicate silently
+		if _, exists := selected[f]; exists {
+			continue
+		}
+		selected[f] = struct{}{}
+	}
+	// Rebuild ordered unique slice (preserve first-seen order, omit empties)
+	ordered := make([]string, 0, len(selected))
+	seen := make(map[string]struct{}, len(selected))
+	for _, f := range fields {
+		f = strings.TrimSpace(f)
+		if f == "" {
+			continue
+		}
+		if _, ok := seen[f]; ok {
+			continue
+		}
+		if _, ok := selected[f]; ok {
+			ordered = append(ordered, f)
+			seen[f] = struct{}{}
+		}
+	}
+	return ordered, selected
+}
+
 func buildKey(host, addr string, port int) string {
 	return host + "|" + addr + "|" + fmt.Sprint(port)
 }
@@ -51,17 +93,7 @@ func discover(name string, outputFields []string, printResults bool) ([]Service,
 		return nil, fmt.Errorf("init resolver: %w", err)
 	}
 
-	if len(outputFields) == 0 {
-		outputFields = append(outputFields, "count", "hostname", "address", "port", "text")
-	}
-
-	selectedFields := make(map[string]struct{}, len(outputFields))
-	for _, f := range outputFields {
-		f = strings.TrimSpace(f)
-		if f != "" {
-			selectedFields[f] = struct{}{}
-		}
-	}
+	outputFields, selectedFields := normalizeOutputFields(outputFields)
 
 	if debug && printResults {
 		fmt.Printf("Showing: ")
@@ -89,7 +121,8 @@ func discover(name string, outputFields []string, printResults bool) ([]Service,
 	}
 
 	var collected []Service
-	seen := make(map[string]struct{}) // deduplicate host|addr|port
+	// Deduplicate host|addr|port
+	seen := make(map[string]struct{})
 	for {
 		select {
 		case <-ctx.Done():
@@ -193,16 +226,18 @@ func main() {
 			if a == "--output" {
 				if i+1 < len(os.Args) {
 					mode = os.Args[i+1]
-					i++ // consume next
+					// Consume next argument value
+					i++
 				} else {
 					fmt.Fprintf(os.Stderr, "--output flag requires a value (text or json)\n")
-					os.Exit(exitUsage)
+					exit(exitUsage)
 				}
 			} else if strings.HasPrefix(a, "--output=") {
 				mode = strings.TrimPrefix(a, "--output=")
-			} else { // partial match like --output: treat as error
+			} else {
+				// Partial match like --output: treat as error
 				fmt.Fprintf(os.Stderr, "Unrecognized flag form: %s\n", a)
-				os.Exit(exitUsage)
+				exit(exitUsage)
 			}
 			mode = strings.ToLower(strings.TrimSpace(mode))
 			switch mode {
@@ -214,7 +249,7 @@ func main() {
 			default:
 				fmt.Fprintf(os.Stderr, "Unknown output mode: %s (expected text or json)\n", mode)
 				help(progname, version)
-				os.Exit(exitUsage)
+				exit(exitUsage)
 			}
 			continue
 		}
@@ -223,27 +258,29 @@ func main() {
 	os.Args = filteredArgs
 
 	if len(os.Args) > 1 {
-		if "help" == os.Args[1] {
+		if os.Args[1] == "help" {
 			help(progname, version)
-			os.Exit(exitOK)
-		} else if "show-fields" == os.Args[1] {
+			exit(exitOK)
+		} else if os.Args[1] == "show-fields" {
 			if len(os.Args) == 2 {
 				fmt.Fprintf(os.Stderr, "Missing output filter. Please specify what to output with \"show-fields\"\n")
 				help(progname, version)
-				os.Exit(exitUsage)
+				exit(exitUsage)
 			}
 			for _, v := range strings.Split(os.Args[2], ",") {
 				outputFields = append(outputFields, strings.TrimSpace(v))
 			}
-			if len(os.Args) > 3 { // unexpected extra args after show-fields spec
+			// Unexpected extra args after show-fields spec
+			if len(os.Args) > 3 {
 				fmt.Fprintf(os.Stderr, "Unexpected extra arguments: %v\n", os.Args[3:])
 				help(progname, version)
-				os.Exit(exitUsage)
+				exit(exitUsage)
 			}
-		} else { // unknown subcommand
+		} else {
+			// Unknown subcommand
 			fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
 			help(progname, version)
-			os.Exit(exitUsage)
+			exit(exitUsage)
 		}
 	}
 
@@ -255,11 +292,11 @@ func main() {
 	}
 
 	var discovered []Service
-	if "" != serviceFilter {
+	if serviceFilter != "" {
 		res, err := discover(serviceFilter, outputFields, printResults)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: discover %s: %v\n", serviceFilter, err)
-			os.Exit(exitErr)
+			exit(exitErr)
 		}
 		discovered = append(discovered, res...)
 	} else {
@@ -283,18 +320,8 @@ func main() {
 
 		seen := make(map[string]struct{})
 		count := 0
-		selectedFields := make(map[string]struct{})
-
-		if len(outputFields) == 0 {
-			outputFields = append(outputFields, "count", "hostname", "address", "port", "text")
-		}
-
-		for _, f := range outputFields {
-			f = strings.TrimSpace(f)
-			if f != "" {
-				selectedFields[f] = struct{}{}
-			}
-		}
+		var selectedFields map[string]struct{}
+		outputFields, selectedFields = normalizeOutputFields(outputFields)
 		for b := range ch {
 			if b.err != nil {
 				fmt.Fprintf(os.Stderr, "warn: discover %s: %v\n", b.name, b.err)
@@ -335,7 +362,7 @@ func main() {
 		data, err := json.MarshalIndent(discovered, "", "  ")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: marshal json: %v\n", err)
-			os.Exit(exitErr)
+			exit(exitErr)
 		}
 		fmt.Println(string(data))
 		return
