@@ -676,6 +676,34 @@ func main() {
 		}
 	}
 
+	// Early validate user requested fields (exit on any invalid)
+	if len(outputFields) > 0 {
+		allowedSet := make(map[string]struct{})
+		for _, f := range docmeta.AllowedFields() {
+			allowedSet[f] = struct{}{}
+		}
+		invalid := make([]string, 0)
+		seenReq := make(map[string]struct{})
+		for _, raw := range outputFields {
+			name := strings.TrimSpace(raw)
+			if name == "" {
+				continue
+			}
+			if _, dup := seenReq[name]; dup {
+				continue
+			}
+			seenReq[name] = struct{}{}
+			if _, ok := allowedSet[name]; !ok {
+				invalid = append(invalid, name)
+			}
+		}
+		if len(invalid) > 0 {
+			fmt.Fprintf(os.Stderr, "Invalid field name(s): %s\n", strings.Join(invalid, ", "))
+			fmt.Fprintf(os.Stderr, "Use 'show-fields \"a,b,c\"' with only allowed field names (see --help).\n")
+			exit(exitUsage)
+		}
+	}
+
 	// Normalize output fields once and reuse
 	outputFields, selectedFields := normalizeOutputFields(outputFields)
 
