@@ -21,7 +21,11 @@ type Service struct {
 }
 
 func discover(name string, output_filter []string) ([]Service, error) {
+	// debug now controlled via env MDNS_DEBUG
 	debug := false
+	if os.Getenv("MDNS_DEBUG") == "1" || strings.ToLower(os.Getenv("MDNS_DEBUG")) == "true" {
+		debug = true
+	}
 	nresults := 0
 	resolver, err := zeroconf.NewResolver(nil)
 	if err != nil {
@@ -64,6 +68,7 @@ func discover(name string, output_filter []string) ([]Service, error) {
 	}
 
 	var collected []Service
+	seen := make(map[string]struct{}) // deduplicate host|addr|port
 	for {
 		select {
 		case <-ctx.Done():
@@ -72,41 +77,48 @@ func discover(name string, output_filter []string) ([]Service, error) {
 			if !ok {
 				return collected, nil
 			}
-			for _, addr := range entry.AddrIPv4 { // IPv4 only for now
-				nresults++
-				joinedTXT := ""
-				if len(entry.Text) > 0 {
-					joinedTXT = strings.Join(entry.Text, ";")
+
+			emit := func(host string, addrStr string, port int, joinedTXT string) {
+				key := host + "|" + addrStr + "|" + fmt.Sprint(port)
+				if _, exists := seen[key]; exists {
+					return
 				}
+				seen[key] = struct{}{}
+				nresults++
 				if _, ok := selectedFields["count"]; ok {
 					fmt.Printf("%d ", nresults)
 				}
 				if _, ok := selectedFields["hostname"]; ok {
-					fmt.Printf("%s ", entry.HostName)
+					fmt.Printf("%s ", host)
 				}
 				if _, ok := selectedFields["address"]; ok {
-					fmt.Printf("%s ", addr)
+					fmt.Printf("%s ", addrStr)
 				}
 				if _, ok := selectedFields["port"]; ok {
-					fmt.Printf("%d ", entry.Port)
+					fmt.Printf("%d ", port)
 				}
 				if _, ok := selectedFields["text"]; ok && joinedTXT != "" {
 					fmt.Printf("%s ", joinedTXT)
 				}
 				fmt.Println()
-				collected = append(collected, Service{Hostname: entry.HostName, Address: addr.String(), Port: entry.Port, Text: joinedTXT})
+				collected = append(collected, Service{Hostname: host, Address: addrStr, Port: port, Text: joinedTXT})
+			}
+
+			joinedTXT := ""
+			if len(entry.Text) > 0 {
+				joinedTXT = strings.Join(entry.Text, ";")
+			}
+
+			// IPv4
+			for _, addr := range entry.AddrIPv4 {
+				emit(entry.HostName, addr.String(), entry.Port, joinedTXT)
+			}
+			// IPv6
+			for _, addr := range entry.AddrIPv6 {
+				emit(entry.HostName, addr.String(), entry.Port, joinedTXT)
 			}
 		}
 	}
-}
-
-func contains(list []string, element string) bool {
-	for _, v := range list {
-		if v == element {
-			return true
-		}
-	}
-	return false
 }
 
 func help(name string, version string) {
@@ -119,6 +131,11 @@ func help(name string, version string) {
 	fmt.Printf("  mdns-discover show-fields \"hostname, address\"    - Show specified attributes for all discovered devices\n\n")
 	fmt.Printf("  MDNS_SERVICE_FILTER=\"_workstation._tcp\" \\\n")
 	fmt.Printf("  mdns-discover show-fields \"hostname, address\"    - Show specified attributes for filtered devices\n\n")
+	fmt.Printf("  Environment variables:\n")
+	fmt.Printf("    MDNS_SERVICE_FILTER   - Restrict to a single service type\n")
+	fmt.Printf("    MDNS_FIELD_FILTER     - Comma list of fields (count, hostname, address, port, text)\n")
+	fmt.Printf("    MDNS_TIMEOUT          - Duration (e.g. 10s, 30s, 1m)\n")
+	fmt.Printf("    MDNS_DEBUG            - Set to 1 / true for verbose discovery debug\n\n")
 }
 
 func main() {
@@ -129,29 +146,25 @@ func main() {
 	var output_filter []string
 
 	if len(os.Args) > 1 {
-		// Show help
 		if "help" == os.Args[1] {
 			help(progname, version)
 			os.Exit(0)
 		} else if "show-fields" == os.Args[1] {
 			if len(os.Args) == 2 {
-				fmt.Printf("Missing output filter. Please specify what to output with \"show\"\n")
+				fmt.Printf("Missing output filter. Please specify what to output with \"show-fields\"\n")
 				help(progname, version)
 				os.Exit(1)
-			} else {
-				var output_filter_toks []string
-				output_filter_toks = strings.Split(os.Args[2], ",")
-				for _, v := range output_filter_toks {
-					output_filter = append(output_filter, strings.TrimSpace(v))
-				}
 			}
-			// Check if env var is set, argument takes precedence
-		} else if field_filter != "" {
-			var output_filter_toks []string
-			output_filter_toks = strings.Split(field_filter, ",")
-			for _, v := range output_filter_toks {
+			for _, v := range strings.Split(os.Args[2], ",") {
 				output_filter = append(output_filter, strings.TrimSpace(v))
 			}
+		}
+	}
+
+	// Apply env var field filter only if not already set by CLI
+	if len(output_filter) == 0 && field_filter != "" {
+		for _, v := range strings.Split(field_filter, ",") {
+			output_filter = append(output_filter, strings.TrimSpace(v))
 		}
 	}
 
