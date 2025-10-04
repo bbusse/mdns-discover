@@ -72,6 +72,41 @@ type DiscoveryStats struct {
 	Warnings           []string
 }
 
+// RunSummary is a pure data representation of aggregated discovery results
+type RunSummary struct {
+	Elapsed            time.Duration
+	ServiceTypes       int
+	Instances          int
+	InstancesPerSecond float64
+	SuppressedTimeouts int
+	Errors             int
+}
+
+// BuildSummary constructs a RunSummary from raw discovery data
+func buildSummary(discovered []Service, stats DiscoveryStats, start time.Time) RunSummary {
+	elapsed := time.Since(start).Truncate(time.Millisecond)
+	unique := make(map[string]struct{})
+	for _, d := range discovered {
+		if d.ServiceType != "" {
+			unique[d.ServiceType] = struct{}{}
+		}
+	}
+	inst := len(discovered)
+	elapsedSec := time.Since(start).Seconds()
+	rate := 0.0
+	if elapsedSec > 0 {
+		rate = float64(inst) / elapsedSec
+	}
+	return RunSummary{
+		Elapsed:            elapsed,
+		ServiceTypes:       len(unique),
+		Instances:          inst,
+		InstancesPerSecond: rate,
+		SuppressedTimeouts: stats.SuppressedTimeouts,
+		Errors:             stats.Errors,
+	}
+}
+
 func discover(name string, outputFields []string, printResults bool, timeout time.Duration, debug bool) ([]Service, error) {
 	nresults := 0
 	resolver, err := zeroconf.NewResolver(nil)
@@ -226,8 +261,7 @@ func printSummary(discovered []Service, start time.Time, enabled bool, stats Dis
 	if !enabled {
 		return
 	}
-	elapsed := time.Since(start).Truncate(time.Millisecond)
-	// ANSI color codes (only used when color=true)
+	sum := buildSummary(discovered, stats, start)
 	reset := ""
 	bold := ""
 	green := ""
@@ -240,51 +274,38 @@ func printSummary(discovered []Service, start time.Time, enabled bool, stats Dis
 		yellow = "\033[33m"
 		red = "\033[31m"
 	}
-	if len(discovered) == 0 {
-		msg := fmt.Sprintf("Summary: Completed in %s — No services found", elapsed)
-		if stats.SuppressedTimeouts > 0 {
-			msg += fmt.Sprintf(" (%d suppressed timeouts)", stats.SuppressedTimeouts)
+	if sum.Instances == 0 {
+		msg := fmt.Sprintf("Summary: Completed in %s — No services found", sum.Elapsed)
+		if sum.SuppressedTimeouts > 0 {
+			msg += fmt.Sprintf(" (%d suppressed timeouts)", sum.SuppressedTimeouts)
 		}
 		fmt.Fprintf(os.Stderr, "%s%s%s\n", bold, msg, reset)
 		return
 	}
-	unique := make(map[string]struct{})
-	for _, d := range discovered {
-		if d.ServiceType != "" {
-			unique[d.ServiceType] = struct{}{}
-		}
-	}
-	us := len(unique)
-	inst := len(discovered)
-	elapsedSec := time.Since(start).Seconds()
-	rate := 0.0
-	if elapsedSec > 0 {
-		rate = float64(inst) / elapsedSec
-	}
 	svcWord := "service types"
-	if us == 1 {
+	if sum.ServiceTypes == 1 {
 		svcWord = "service type"
 	}
 	instWord := "instances"
-	if inst == 1 {
+	if sum.Instances == 1 {
 		instWord = "instance"
 	}
-	usStr := fmt.Sprintf("%d %s", us, svcWord)
-	instStr := fmt.Sprintf("%d %s", inst, instWord)
+	usStr := fmt.Sprintf("%d %s", sum.ServiceTypes, svcWord)
+	instStr := fmt.Sprintf("%d %s", sum.Instances, instWord)
 	if color {
 		usStr = green + usStr + reset
 		instStr = green + instStr + reset
 	}
-	extras := []string{fmt.Sprintf("%.2f inst/s", rate)}
-	if stats.SuppressedTimeouts > 0 {
-		st := fmt.Sprintf("%d suppressed timeouts", stats.SuppressedTimeouts)
+	extras := []string{fmt.Sprintf("%.2f inst/s", sum.InstancesPerSecond)}
+	if sum.SuppressedTimeouts > 0 {
+		st := fmt.Sprintf("%d suppressed timeouts", sum.SuppressedTimeouts)
 		if color {
 			st = yellow + st + reset
 		}
 		extras = append(extras, st)
 	}
-	if stats.Errors > 0 {
-		er := fmt.Sprintf("%d errors", stats.Errors)
+	if sum.Errors > 0 {
+		er := fmt.Sprintf("%d errors", sum.Errors)
 		if color {
 			er = red + er + reset
 		}
@@ -294,9 +315,7 @@ func printSummary(discovered []Service, start time.Time, enabled bool, stats Dis
 	if len(extras) > 0 {
 		extraStr = " (" + strings.Join(extras, ", ") + ")"
 	}
-	fmt.Fprintf(os.Stderr, "%sSummary:%s Completed in %s — %s, %s%s\n", bold, reset, elapsed, usStr, instStr, extraStr)
-
-	// Top service types display (sorted by count desc)
+	fmt.Fprintf(os.Stderr, "%sSummary:%s Completed in %s — %s, %s%s\n", bold, reset, sum.Elapsed, usStr, instStr, extraStr)
 	if len(stats.ServiceTypeCounts) > 0 {
 		type kv struct {
 			k string
@@ -316,7 +335,7 @@ func printSummary(discovered []Service, start time.Time, enabled bool, stats Dis
 		for i := 0; i < len(pairs); i++ {
 			name := pairs[i].k
 			cnt := pairs[i].v
-			pct := float64(cnt) / float64(inst) * 100
+			pct := float64(cnt) / float64(sum.Instances) * 100
 			line := fmt.Sprintf("  %s: %d (%.1f%%)", name, cnt, pct)
 			if color {
 				line = green + line + reset
@@ -678,18 +697,7 @@ func main() {
 
 	if outputMode == OutputJSON {
 		if summaryFlag {
-			elapsedDur := time.Since(startTime).Truncate(time.Millisecond)
-			unique := make(map[string]struct{})
-			for _, d := range discovered {
-				if d.ServiceType != "" {
-					unique[d.ServiceType] = struct{}{}
-				}
-			}
-			elapsedSec := time.Since(startTime).Seconds()
-			rate := 0.0
-			if elapsedSec > 0 {
-
-			}
+			sum := buildSummary(discovered, stats, startTime)
 			payload := struct {
 				Results []Service `json:"results"`
 				Summary struct {
@@ -701,12 +709,12 @@ func main() {
 					Errors        int     `json:"errors"`
 				} `json:"summary"`
 			}{Results: discovered}
-			payload.Summary.Elapsed = elapsedDur.String()
-			payload.Summary.ServiceTypes = len(unique)
-			payload.Summary.Instances = len(discovered)
-			payload.Summary.InstancesPerS = rate
-			payload.Summary.SuppressedTO = stats.SuppressedTimeouts
-			payload.Summary.Errors = stats.Errors
+			payload.Summary.Elapsed = sum.Elapsed.String()
+			payload.Summary.ServiceTypes = sum.ServiceTypes
+			payload.Summary.Instances = sum.Instances
+			payload.Summary.InstancesPerS = sum.InstancesPerSecond
+			payload.Summary.SuppressedTO = sum.SuppressedTimeouts
+			payload.Summary.Errors = sum.Errors
 			data, err := json.MarshalIndent(payload, "", "  ")
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "error: marshal json: %v\n", err)
