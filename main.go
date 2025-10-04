@@ -38,11 +38,12 @@ const (
 //go:generate go run gen/gen_services.go
 
 type Service struct {
-	ServiceType string `json:"service,omitempty"`
-	Hostname    string `json:"hostname"`
-	Address     string `json:"address"`
-	Port        int    `json:"port"`
-	Text        string `json:"text"`
+	ServiceType string            `json:"service,omitempty"`
+	Hostname    string            `json:"hostname"`
+	Address     string            `json:"address"`
+	Port        int               `json:"port"`
+	Text        string            `json:"text"`
+	TxtMap      map[string]string `json:"txtMap,omitempty"`
 }
 
 // NormalizeOutputFields applies defaults if none provided and returns the
@@ -85,6 +86,28 @@ func normalizeOutputFields(fields []string) ([]string, map[string]struct{}) {
 
 func buildKey(host, addr string, port int) string {
 	return host + "|" + addr + "|" + fmt.Sprint(port)
+}
+
+// Parse TXT records into joined string and key=value map
+func parseTXT(txt []string) (string, map[string]string) {
+	if len(txt) == 0 {
+		return "", nil
+	}
+	joined := strings.Join(txt, ";")
+	m := make(map[string]string)
+	for _, raw := range txt {
+		if raw == "" {
+			continue
+		}
+		parts := strings.SplitN(raw, "=", 2)
+		if len(parts) == 2 && parts[0] != "" {
+			m[parts[0]] = parts[1]
+		}
+	}
+	if len(m) == 0 {
+		return joined, nil
+	}
+	return joined, m
 }
 
 func discover(name string, outputFields []string, printResults bool) ([]Service, error) {
@@ -179,18 +202,21 @@ func discover(name string, outputFields []string, printResults bool) ([]Service,
 				collected = append(collected, Service{ServiceType: name, Hostname: host, Address: addrStr, Port: port, Text: joinedTXT})
 			}
 
-			joinedTXT := ""
-			if len(entry.Text) > 0 {
-				joinedTXT = strings.Join(entry.Text, ";")
-			}
+			joinedTXT, txtMap := parseTXT(entry.Text)
 
 			// IPv4
 			for _, addr := range entry.AddrIPv4 {
 				emit(entry.HostName, addr.String(), entry.Port, joinedTXT)
+				if len(txtMap) > 0 {
+					collected[len(collected)-1].TxtMap = txtMap
+				}
 			}
 			// IPv6
 			for _, addr := range entry.AddrIPv6 {
 				emit(entry.HostName, addr.String(), entry.Port, joinedTXT)
+				if len(txtMap) > 0 {
+					collected[len(collected)-1].TxtMap = txtMap
+				}
 			}
 		}
 	}
