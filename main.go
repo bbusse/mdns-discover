@@ -32,6 +32,14 @@ func discover(name string, output_filter []string) ([]Service, error) {
 		output_filter = append(output_filter, "count", "hostname", "address", "port", "text")
 	}
 
+	selectedFields := make(map[string]struct{}, len(output_filter))
+	for _, f := range output_filter {
+		f = strings.TrimSpace(f)
+		if f != "" {
+			selectedFields[f] = struct{}{}
+		}
+	}
+
 	if debug {
 		fmt.Printf("Showing: ")
 		for _, f := range output_filter {
@@ -70,19 +78,19 @@ func discover(name string, output_filter []string) ([]Service, error) {
 				if len(entry.Text) > 0 {
 					joinedTXT = strings.Join(entry.Text, ";")
 				}
-				if contains(output_filter, "count") {
+				if _, ok := selectedFields["count"]; ok {
 					fmt.Printf("%d ", nresults)
 				}
-				if contains(output_filter, "hostname") {
+				if _, ok := selectedFields["hostname"]; ok {
 					fmt.Printf("%s ", entry.HostName)
 				}
-				if contains(output_filter, "address") {
+				if _, ok := selectedFields["address"]; ok {
 					fmt.Printf("%s ", addr)
 				}
-				if contains(output_filter, "port") {
+				if _, ok := selectedFields["port"]; ok {
 					fmt.Printf("%d ", entry.Port)
 				}
-				if contains(output_filter, "text") && joinedTXT != "" {
+				if _, ok := selectedFields["text"]; ok && joinedTXT != "" {
 					fmt.Printf("%s ", joinedTXT)
 				}
 				fmt.Println()
