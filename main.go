@@ -60,6 +60,30 @@ type Service struct {
 	TxtMap      map[string]string `json:"txtMap,omitempty"`
 }
 
+// BuildOutputLine constructs a space separated line for the selected fields in a fixed order
+func buildOutputLine(selectedFields map[string]struct{}, seq int, serviceName, host, addr string, port int, txt string) string {
+	parts := []string{}
+	if _, ok := selectedFields["count"]; ok {
+		parts = append(parts, fmt.Sprintf("%d", seq))
+	}
+	if _, ok := selectedFields["service"]; ok {
+		parts = append(parts, serviceName)
+	}
+	if _, ok := selectedFields["hostname"]; ok {
+		parts = append(parts, host)
+	}
+	if _, ok := selectedFields["address"]; ok {
+		parts = append(parts, addr)
+	}
+	if _, ok := selectedFields["port"]; ok {
+		parts = append(parts, fmt.Sprintf("%d", port))
+	}
+	if _, ok := selectedFields["text"]; ok && txt != "" {
+		parts = append(parts, txt)
+	}
+	return strings.Join(parts, " ")
+}
+
 // NormalizeOutputFields applies defaults if none provided and returns the
 // Final slice plus a set for membership tests
 func normalizeOutputFields(fields []string) ([]string, map[string]struct{}) {
@@ -191,27 +215,9 @@ func discover(name string, outputFields []string, printResults bool) ([]Service,
 				}
 				seen[key] = struct{}{}
 				nresults++
-				var parts []string
-				if _, ok := selectedFields["count"]; ok {
-					parts = append(parts, fmt.Sprintf("%d", nresults))
-				}
-				if _, ok := selectedFields["service"]; ok {
-					parts = append(parts, name)
-				}
-				if _, ok := selectedFields["hostname"]; ok {
-					parts = append(parts, host)
-				}
-				if _, ok := selectedFields["address"]; ok {
-					parts = append(parts, addrStr)
-				}
-				if _, ok := selectedFields["port"]; ok {
-					parts = append(parts, fmt.Sprintf("%d", port))
-				}
-				if _, ok := selectedFields["text"]; ok && joinedTXT != "" {
-					parts = append(parts, joinedTXT)
-				}
+				line := buildOutputLine(selectedFields, nresults, name, host, addrStr, port, joinedTXT)
 				if printResults {
-					fmt.Println(strings.Join(parts, " "))
+					fmt.Println(line)
 				}
 				collected = append(collected, Service{ServiceType: name, Hostname: host, Address: addrStr, Port: port, Text: joinedTXT})
 			}
@@ -564,26 +570,8 @@ func main() {
 				seen[key] = struct{}{}
 				count++
 				if printResults && outputMode == OutputText {
-					parts := []string{}
-					if _, ok := selectedFields["count"]; ok {
-						parts = append(parts, fmt.Sprintf("%d", count))
-					}
-					if _, ok := selectedFields["service"]; ok {
-						parts = append(parts, b.name)
-					}
-					if _, ok := selectedFields["hostname"]; ok {
-						parts = append(parts, srv.Hostname)
-					}
-					if _, ok := selectedFields["address"]; ok {
-						parts = append(parts, srv.Address)
-					}
-					if _, ok := selectedFields["port"]; ok {
-						parts = append(parts, fmt.Sprintf("%d", srv.Port))
-					}
-					if _, ok := selectedFields["text"]; ok && srv.Text != "" {
-						parts = append(parts, srv.Text)
-					}
-					fmt.Println(strings.Join(parts, " "))
+					line := buildOutputLine(selectedFields, count, b.name, srv.Hostname, srv.Address, srv.Port, srv.Text)
+					fmt.Println(line)
 				}
 				srv.ServiceType = b.name
 				discovered = append(discovered, srv)
