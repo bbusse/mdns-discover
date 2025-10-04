@@ -13,6 +13,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -29,9 +30,19 @@ import (
 
 const defaultTimeout = 15 * time.Second
 const (
-	exitOK    = 0
-	exitErr   = 1
-	exitUsage = 2
+	exitOK          = 0
+	exitErr         = 1
+	exitUsage       = 2
+	exitResolveInit = 3
+	exitBrowseFail  = 4
+	exitTimeoutZero = 5
+)
+
+// Sentinel errors for classification
+var (
+	errResolverInit = fmt.Errorf("resolver init failed")
+	errBrowseFailed = fmt.Errorf("browse failed")
+	errTimedOutZero = fmt.Errorf("timeout no results")
 )
 
 // Maximum number of simultaneous discover operations (overridable)
@@ -156,7 +167,7 @@ func discover(name string, outputFields []string, printResults bool) ([]Service,
 	nresults := 0
 	resolver, err := zeroconf.NewResolver(nil)
 	if err != nil {
-		return nil, fmt.Errorf("init resolver: %w", err)
+		return nil, fmt.Errorf("%w: %v", errResolverInit, err)
 	}
 
 	outputFields, selectedFields := normalizeOutputFields(outputFields)
@@ -183,7 +194,7 @@ func discover(name string, outputFields []string, printResults bool) ([]Service,
 	defer cancel()
 
 	if err = resolver.Browse(ctx, name, "local.", entries); err != nil {
-		return nil, fmt.Errorf("browse: %w", err)
+		return nil, fmt.Errorf("%w: %v", errBrowseFailed, err)
 	}
 
 	var collected []Service
@@ -198,6 +209,9 @@ func discover(name string, outputFields []string, printResults bool) ([]Service,
 				} else {
 					fmt.Fprintf(os.Stderr, "debug: discovery for %s context done (%d results)\n", name, len(collected))
 				}
+			}
+			if ctx.Err() == context.DeadlineExceeded && len(collected) == 0 {
+				return collected, errTimedOutZero
 			}
 			return collected, nil
 		case entry, ok := <-entries:
@@ -528,7 +542,16 @@ func main() {
 		res, err := discover(serviceFilter, outputFields, printResults)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: discover %s: %v\n", serviceFilter, err)
-			exit(exitErr)
+			// Classify exit code
+			code := exitErr
+			if errors.Is(err, errResolverInit) {
+				code = exitResolveInit
+			} else if errors.Is(err, errBrowseFailed) {
+				code = exitBrowseFail
+			} else if errors.Is(err, errTimedOutZero) {
+				code = exitTimeoutZero
+			}
+			exit(code)
 		}
 		discovered = append(discovered, res...)
 	} else {
