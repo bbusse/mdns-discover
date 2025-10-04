@@ -503,12 +503,16 @@ func main() {
 	outputMode := OutputText
 	printResults := true
 
-	// Establish defaults (env may override defaults; flags override env)
+	// Establish defaults (env may override defaults; flags override env). Strict validation.
 	defaultConcurrency := maxConcurrentDiscover
 	if v := os.Getenv("MDNS_CONCURRENCY"); v != "" {
-		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
-			defaultConcurrency = n
+		vv := strings.TrimSpace(v)
+		n, err := strconv.Atoi(vv)
+		if err != nil || n <= 0 {
+			fmt.Fprintf(os.Stderr, "Invalid MDNS_CONCURRENCY '%s' (must be positive integer)\n", v)
+			exit(exitUsage)
 		}
+		defaultConcurrency = n
 	}
 
 	var outputModeStr string
@@ -580,24 +584,25 @@ func main() {
 		exit(exitUsage)
 	}
 
-	// If timeout flag provided, set environment override chain by exporting value into local var used later
-	// Determine effective timeout (flag > env > default)
+	// Determine effective timeout (flag > env > default) with strict validation.
 	effectiveTimeout = defaultTimeout
 	if envTO := os.Getenv("MDNS_TIMEOUT"); envTO != "" {
-		if d, err := time.ParseDuration(envTO); err == nil {
-			effectiveTimeout = d
-		} else {
-			fmt.Fprintf(os.Stderr, "warning: invalid MDNS_TIMEOUT '%s' (using default %s)\n", envTO, effectiveTimeout)
+		vv := strings.TrimSpace(envTO)
+		d, err := time.ParseDuration(vv)
+		if err != nil || d <= 0 {
+			fmt.Fprintf(os.Stderr, "Invalid MDNS_TIMEOUT '%s' (must be positive duration, e.g. 10s, 1m)\n", envTO)
+			exit(exitUsage)
 		}
+		effectiveTimeout = d
 	}
 	if timeoutFlag != "" {
-		if d, err := time.ParseDuration(timeoutFlag); err == nil {
-			effectiveTimeout = d
-		} else {
-			fmt.Fprintf(os.Stderr, "Invalid --timeout value: %s\n", timeoutFlag)
+		d, err := time.ParseDuration(timeoutFlag)
+		if err != nil || d <= 0 {
+			fmt.Fprintf(os.Stderr, "Invalid --timeout value: %s (must be positive duration)\n", timeoutFlag)
 			fs.Usage()
 			exit(exitUsage)
 		}
+		effectiveTimeout = d
 	}
 
 	// Remaining args (subcommands)
@@ -683,7 +688,7 @@ func main() {
 			elapsedSec := time.Since(startTime).Seconds()
 			rate := 0.0
 			if elapsedSec > 0 {
-				rate = float64(len(discovered)) / elapsedSec
+
 			}
 			payload := struct {
 				Results []Service `json:"results"`
