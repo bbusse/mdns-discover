@@ -46,8 +46,8 @@ var (
 	errNoServicesConfigured = fmt.Errorf("no built-in services configured")
 )
 
-// Maximum number of simultaneous discover operations (overridable)
-var maxConcurrentDiscover = 10
+// Default maximum number of simultaneous discover operations
+const defaultMaxConcurrentDiscover = 10
 
 func exit(code int) {
 	os.Exit(code)
@@ -190,7 +190,7 @@ func discover(name string, outputFields []string, selectedFields map[string]stru
 }
 
 // DiscoverAll concurrently discovers across multiple service names
-func discoverAll(serviceNames []string, outputFields []string, selectedFields map[string]struct{}, printResults bool, outputMode OutputMode, timeout time.Duration, debug bool) ([]Service, DiscoveryStats, error) {
+func discoverAll(serviceNames []string, outputFields []string, selectedFields map[string]struct{}, concurrency int, printResults bool, outputMode OutputMode, timeout time.Duration, debug bool) ([]Service, DiscoveryStats, error) {
 	// Guard empty services list
 	if len(serviceNames) == 0 {
 		return nil, DiscoveryStats{}, errNoServicesConfigured
@@ -202,7 +202,10 @@ func discoverAll(serviceNames []string, outputFields []string, selectedFields ma
 	}
 	ch := make(chan batch, len(serviceNames))
 	wg := sync.WaitGroup{}
-	sem := make(chan struct{}, maxConcurrentDiscover)
+	if concurrency <= 0 {
+		concurrency = 1
+	}
+	sem := make(chan struct{}, concurrency)
 	for _, s := range serviceNames {
 		svc := s
 		wg.Add(1)
@@ -519,7 +522,7 @@ func main() {
 	printResults := true
 
 	// Establish defaults (env may override defaults; flags override env). Strict validation.
-	defaultConcurrency := maxConcurrentDiscover
+	defaultConcurrency := defaultMaxConcurrentDiscover
 	if v := os.Getenv("MDNS_CONCURRENCY"); v != "" {
 		vv := strings.TrimSpace(v)
 		n, err := strconv.Atoi(vv)
@@ -591,9 +594,7 @@ func main() {
 		fs.Usage()
 		exit(exitUsage)
 	}
-	if concurrency > 0 {
-		maxConcurrentDiscover = concurrency
-	} else {
+	if concurrency <= 0 {
 		fmt.Fprintf(os.Stderr, "Invalid --concurrency value: %d (must be > 0)\n", concurrency)
 		fs.Usage()
 		exit(exitUsage)
@@ -681,7 +682,7 @@ func main() {
 		}
 		discovered = append(discovered, res...)
 	} else {
-		res, st, err := discoverAll(services[:], outputFields, selectedFields, printResults, outputMode, effectiveTimeout, debug)
+		res, st, err := discoverAll(services[:], outputFields, selectedFields, concurrency, printResults, outputMode, effectiveTimeout, debug)
 		if err != nil {
 			if errors.Is(err, errNoServicesConfigured) {
 				fmt.Fprintln(os.Stderr, "No built-in services available (services list empty) — rebuild may be required")
