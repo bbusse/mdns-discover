@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -15,6 +16,16 @@ const (
 	exitOK    = 0
 	exitErr   = 1
 	exitUsage = 2
+)
+
+var suppressPrint bool
+
+// OutputMode represents how results should be emitted
+type OutputMode int
+
+const (
+	OutputText OutputMode = iota
+	OutputJSON
 )
 
 //go:generate go run gen/gen_services.go
@@ -53,7 +64,7 @@ func discover(name string, outputFields []string) ([]Service, error) {
 		}
 	}
 
-	if debug {
+	if debug && !suppressPrint {
 		fmt.Printf("Showing: ")
 		for _, f := range outputFields {
 			fmt.Printf("%s ", f)
@@ -122,7 +133,9 @@ func discover(name string, outputFields []string) ([]Service, error) {
 				if _, ok := selectedFields["text"]; ok && joinedTXT != "" {
 					parts = append(parts, joinedTXT)
 				}
-				fmt.Println(strings.Join(parts, " "))
+				if !suppressPrint {
+					fmt.Println(strings.Join(parts, " "))
+				}
 				collected = append(collected, Service{Hostname: host, Address: addrStr, Port: port, Text: joinedTXT})
 			}
 
@@ -148,6 +161,7 @@ func help(name string, version string) {
 	fmt.Printf(" Usage:\n\n")
 	fmt.Printf("  mdns-discover                             - Show all discovered devices\n\n")
 	fmt.Printf("  mdns-discover help                        - Show usage\n\n")
+	fmt.Printf("  mdns-discover --output=json               - Output all discovered devices as JSON array\n\n")
 	fmt.Printf("  MDNS_SERVICE_FILTER=\"_workstation._tcp\" \\\n")
 	fmt.Printf("  mdns-discover                             - Show filtered devices\n\n")
 	fmt.Printf("  mdns-discover show-fields \"hostname, address\"    - Show specified attributes for all discovered devices\n\n")
@@ -158,6 +172,8 @@ func help(name string, version string) {
 	fmt.Printf("    MDNS_FIELD_FILTER     - Comma list of fields (count, hostname, address, port, text)\n")
 	fmt.Printf("    MDNS_TIMEOUT          - Duration (e.g. 10s, 30s, 1m)\n")
 	fmt.Printf("    MDNS_DEBUG            - Set to 1 / true for verbose discovery debug\n\n")
+	fmt.Printf("  Flags:\n")
+	fmt.Printf("    --output=text|json    - Select output format (default text)\n\n")
 }
 
 func main() {
@@ -166,6 +182,45 @@ func main() {
 	serviceFilter := os.Getenv("MDNS_SERVICE_FILTER")
 	fieldFilter := os.Getenv("MDNS_FIELD_FILTER")
 	var outputFields []string
+	outputMode := OutputText
+
+	// Minimal flag scan for --output[=]<mode>
+	filteredArgs := []string{os.Args[0]}
+	for i := 1; i < len(os.Args); i++ {
+		a := os.Args[i]
+		if strings.HasPrefix(a, "--output") {
+			mode := ""
+			if a == "--output" { // value may be next arg
+				if i+1 < len(os.Args) {
+					mode = os.Args[i+1]
+					i++ // consume next
+				} else {
+					fmt.Fprintf(os.Stderr, "--output flag requires a value (text or json)\n")
+					os.Exit(exitUsage)
+				}
+			} else if strings.HasPrefix(a, "--output=") {
+				mode = strings.TrimPrefix(a, "--output=")
+			} else { // partial match like --output: treat as error
+				fmt.Fprintf(os.Stderr, "Unrecognized flag form: %s\n", a)
+				os.Exit(exitUsage)
+			}
+			mode = strings.ToLower(strings.TrimSpace(mode))
+			switch mode {
+			case "text", "":
+				outputMode = OutputText
+			case "json":
+				outputMode = OutputJSON
+				suppressPrint = true
+			default:
+				fmt.Fprintf(os.Stderr, "Unknown output mode: %s (expected text or json)\n", mode)
+				help(progname, version)
+				os.Exit(exitUsage)
+			}
+			continue
+		}
+		filteredArgs = append(filteredArgs, a)
+	}
+	os.Args = filteredArgs
 
 	if len(os.Args) > 1 {
 		if "help" == os.Args[1] {
@@ -218,7 +273,16 @@ func main() {
 		}
 	}
 
-	if len(discovered) == 0 {
+	if outputMode == OutputJSON {
+		// ensure we suppress printing (already set earlier if needed)
+		data, err := json.MarshalIndent(discovered, "", "  ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: marshal json: %v\n", err)
+			os.Exit(exitErr)
+		}
+		fmt.Println(string(data))
+		return
+	} else if len(discovered) == 0 {
 		fmt.Fprintln(os.Stderr, "No services discovered (consider adjusting MDNS_TIMEOUT or filters)")
 	}
 }
