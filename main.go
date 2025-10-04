@@ -38,17 +38,18 @@ const (
 //go:generate go run gen/gen_services.go
 
 type Service struct {
-	Hostname string `json:"hostname"`
-	Address  string `json:"address"`
-	Port     int    `json:"port"`
-	Text     string `json:"text"`
+	ServiceType string `json:"service,omitempty"`
+	Hostname    string `json:"hostname"`
+	Address     string `json:"address"`
+	Port        int    `json:"port"`
+	Text        string `json:"text"`
 }
 
 // NormalizeOutputFields applies defaults if none provided and returns the
 // Final slice plus a set for membership tests
 func normalizeOutputFields(fields []string) ([]string, map[string]struct{}) {
 	if len(fields) == 0 {
-		fields = append(fields, "count", "hostname", "address", "port", "text")
+		fields = append(fields, "count", "service", "hostname", "address", "port", "text")
 	}
 	selected := make(map[string]struct{}, len(fields))
 	for _, f := range fields {
@@ -157,6 +158,9 @@ func discover(name string, outputFields []string, printResults bool) ([]Service,
 				if _, ok := selectedFields["count"]; ok {
 					parts = append(parts, fmt.Sprintf("%d", nresults))
 				}
+				if _, ok := selectedFields["service"]; ok {
+					parts = append(parts, name)
+				}
 				if _, ok := selectedFields["hostname"]; ok {
 					parts = append(parts, host)
 				}
@@ -172,7 +176,7 @@ func discover(name string, outputFields []string, printResults bool) ([]Service,
 				if printResults {
 					fmt.Println(strings.Join(parts, " "))
 				}
-				collected = append(collected, Service{Hostname: host, Address: addrStr, Port: port, Text: joinedTXT})
+				collected = append(collected, Service{ServiceType: name, Hostname: host, Address: addrStr, Port: port, Text: joinedTXT})
 			}
 
 			joinedTXT := ""
@@ -205,7 +209,7 @@ func help(name string, version string) {
 	fmt.Printf("  mdns-discover show-fields \"hostname, address\"    - Show specified attributes for filtered devices\n\n")
 	fmt.Printf("  Environment variables:\n")
 	fmt.Printf("    MDNS_SERVICE_FILTER   - Restrict to a single service type\n")
-	fmt.Printf("    MDNS_FIELD_FILTER     - Comma list of fields (count, hostname, address, port, text)\n")
+	fmt.Printf("    MDNS_FIELD_FILTER     - Comma list of fields (count, service, hostname, address, port, text)\n")
 	fmt.Printf("    MDNS_TIMEOUT          - Duration (e.g. 10s, 30s, 1m)\n")
 	fmt.Printf("    MDNS_DEBUG            - Set to 1 / true for verbose discovery debug\n\n")
 	fmt.Printf("  Flags:\n")
@@ -375,6 +379,9 @@ func main() {
 					if _, ok := selectedFields["count"]; ok {
 						parts = append(parts, fmt.Sprintf("%d", count))
 					}
+					if _, ok := selectedFields["service"]; ok {
+						parts = append(parts, b.name)
+					}
 					if _, ok := selectedFields["hostname"]; ok {
 						parts = append(parts, srv.Hostname)
 					}
@@ -389,6 +396,7 @@ func main() {
 					}
 					fmt.Println(strings.Join(parts, " "))
 				}
+				srv.ServiceType = b.name
 				discovered = append(discovered, srv)
 			}
 		}
