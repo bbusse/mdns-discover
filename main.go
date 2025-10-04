@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
 	"strings"
 	"time"
@@ -24,10 +23,14 @@ type Service struct {
 	Hostname string `json:"hostname"`
 	Address  string `json:"address"`
 	Port     int    `json:"port"`
-	Text     string `json:"text"` // Joined TXT records
+	Text     string `json:"text"`
 }
 
-func discover(name string, output_filter []string) ([]Service, error) {
+func buildKey(host, addr string, port int) string {
+	return host + "|" + addr + "|" + fmt.Sprint(port)
+}
+
+func discover(name string, outputFields []string) ([]Service, error) {
 	debug := false
 	if os.Getenv("MDNS_DEBUG") == "1" || strings.ToLower(os.Getenv("MDNS_DEBUG")) == "true" {
 		debug = true
@@ -38,12 +41,12 @@ func discover(name string, output_filter []string) ([]Service, error) {
 		return nil, fmt.Errorf("init resolver: %w", err)
 	}
 
-	if len(output_filter) == 0 {
-		output_filter = append(output_filter, "count", "hostname", "address", "port", "text")
+	if len(outputFields) == 0 {
+		outputFields = append(outputFields, "count", "hostname", "address", "port", "text")
 	}
 
-	selectedFields := make(map[string]struct{}, len(output_filter))
-	for _, f := range output_filter {
+	selectedFields := make(map[string]struct{}, len(outputFields))
+	for _, f := range outputFields {
 		f = strings.TrimSpace(f)
 		if f != "" {
 			selectedFields[f] = struct{}{}
@@ -52,7 +55,7 @@ func discover(name string, output_filter []string) ([]Service, error) {
 
 	if debug {
 		fmt.Printf("Showing: ")
-		for _, f := range output_filter {
+		for _, f := range outputFields {
 			fmt.Printf("%s ", f)
 		}
 		fmt.Println()
@@ -97,28 +100,29 @@ func discover(name string, output_filter []string) ([]Service, error) {
 			}
 
 			emit := func(host string, addrStr string, port int, joinedTXT string) {
-				key := host + "|" + addrStr + "|" + fmt.Sprint(port)
+				key := buildKey(host, addrStr, port)
 				if _, exists := seen[key]; exists {
 					return
 				}
 				seen[key] = struct{}{}
 				nresults++
+				var parts []string
 				if _, ok := selectedFields["count"]; ok {
-					fmt.Printf("%d ", nresults)
+					parts = append(parts, fmt.Sprintf("%d", nresults))
 				}
 				if _, ok := selectedFields["hostname"]; ok {
-					fmt.Printf("%s ", host)
+					parts = append(parts, host)
 				}
 				if _, ok := selectedFields["address"]; ok {
-					fmt.Printf("%s ", addrStr)
+					parts = append(parts, addrStr)
 				}
 				if _, ok := selectedFields["port"]; ok {
-					fmt.Printf("%d ", port)
+					parts = append(parts, fmt.Sprintf("%d", port))
 				}
 				if _, ok := selectedFields["text"]; ok && joinedTXT != "" {
-					fmt.Printf("%s ", joinedTXT)
+					parts = append(parts, joinedTXT)
 				}
-				fmt.Println()
+				fmt.Println(strings.Join(parts, " "))
 				collected = append(collected, Service{Hostname: host, Address: addrStr, Port: port, Text: joinedTXT})
 			}
 
@@ -159,9 +163,9 @@ func help(name string, version string) {
 func main() {
 	progname := os.Args[0]
 	version := "1"
-	service_filter := os.Getenv("MDNS_SERVICE_FILTER")
-	field_filter := os.Getenv("MDNS_FIELD_FILTER")
-	var output_filter []string
+	serviceFilter := os.Getenv("MDNS_SERVICE_FILTER")
+	fieldFilter := os.Getenv("MDNS_FIELD_FILTER")
+	var outputFields []string
 
 	if len(os.Args) > 1 {
 		if "help" == os.Args[1] {
@@ -174,7 +178,7 @@ func main() {
 				os.Exit(exitUsage)
 			}
 			for _, v := range strings.Split(os.Args[2], ",") {
-				output_filter = append(output_filter, strings.TrimSpace(v))
+				outputFields = append(outputFields, strings.TrimSpace(v))
 			}
 			if len(os.Args) > 3 { // unexpected extra args after show-fields spec
 				fmt.Fprintf(os.Stderr, "Unexpected extra arguments: %v\n", os.Args[3:])
@@ -189,27 +193,32 @@ func main() {
 	}
 
 	// Apply env var field filter only if not already set by CLI
-	if len(output_filter) == 0 && field_filter != "" {
-		for _, v := range strings.Split(field_filter, ",") {
-			output_filter = append(output_filter, strings.TrimSpace(v))
+	if len(outputFields) == 0 && fieldFilter != "" {
+		for _, v := range strings.Split(fieldFilter, ",") {
+			outputFields = append(outputFields, strings.TrimSpace(v))
 		}
 	}
 
 	var discovered []Service
-	if "" != service_filter {
-		res, err := discover(service_filter, output_filter)
+	if "" != serviceFilter {
+		res, err := discover(serviceFilter, outputFields)
 		if err != nil {
-			log.Fatalln(err)
+			fmt.Fprintf(os.Stderr, "error: discover %s: %v\n", serviceFilter, err)
+			os.Exit(exitErr)
 		}
 		discovered = append(discovered, res...)
-		return
+	} else {
+		for _, s := range services {
+			res, err := discover(s, outputFields)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "warn: discover %s: %v\n", s, err)
+				continue
+			}
+			discovered = append(discovered, res...)
+		}
 	}
-	for _, s := range services {
-		res, err := discover(s, output_filter)
-		if err != nil {
-			log.Printf("error discovering %s: %v", s, err)
-			continue
-		}
-		discovered = append(discovered, res...)
+
+	if len(discovered) == 0 {
+		fmt.Fprintln(os.Stderr, "No services discovered (consider adjusting MDNS_TIMEOUT or filters)")
 	}
 }
