@@ -46,6 +46,20 @@ var (
 	errNoServicesConfigured = fmt.Errorf("no built-in services configured")
 )
 
+// Map discovery error to process exit code
+func classifyExit(err error) int {
+	if errors.Is(err, errResolverInit) {
+		return exitResolveInit
+	}
+	if errors.Is(err, errBrowseFailed) {
+		return exitBrowseFail
+	}
+	if errors.Is(err, errTimedOutZero) {
+		return exitTimeoutZero
+	}
+	return exitErr
+}
+
 // Default maximum number of simultaneous discover operations
 const defaultMaxConcurrentDiscover = 10
 
@@ -669,16 +683,7 @@ func main() {
 		res, err := discover(serviceFilter, outputFields, selectedFields, printResults, effectiveTimeout, debug)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: discover %s: %v\n", serviceFilter, err)
-			// Classify exit code
-			code := exitErr
-			if errors.Is(err, errResolverInit) {
-				code = exitResolveInit
-			} else if errors.Is(err, errBrowseFailed) {
-				code = exitBrowseFail
-			} else if errors.Is(err, errTimedOutZero) {
-				code = exitTimeoutZero
-			}
-			exit(code)
+			exit(classifyExit(err))
 		}
 		discovered = append(discovered, res...)
 	} else {
