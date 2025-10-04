@@ -14,10 +14,10 @@ import (
 //go:generate go run gen/gen_services.go
 
 type Service struct {
-	hostname string `json:"hostname"`
-	address  string `json:"address"`
-	port     int    `json:"port"`
-	text     string `json:"text"`
+	Hostname string `json:"hostname"`
+	Address  string `json:"address"`
+	Port     int    `json:"port"`
+	Text     string `json:"text"`
 }
 
 func discover(services []Service, name string, output_filter []string) {
@@ -62,10 +62,10 @@ func discover(services []Service, name string, output_filter []string) {
 					fmt.Printf("%s ", entry.Text)
 				}
 				fmt.Println()
-				service_data := Service{hostname: entry.HostName,
-					address: fmt.Sprintf("%s", addr),
-					port:    entry.Port,
-					text:    fmt.Sprintf("%s", entry.Text)}
+				service_data := Service{Hostname: entry.HostName,
+					Address: fmt.Sprintf("%s", addr),
+					Port:    entry.Port,
+					Text:    fmt.Sprintf("%s", entry.Text)}
 				services = append(services, service_data)
 			}
 		}
