@@ -98,7 +98,9 @@ type RunSummary struct {
 
 // BuildSummary constructs a RunSummary from raw discovery data
 func buildSummary(discovered []Service, stats DiscoveryStats, start time.Time) RunSummary {
-	elapsed := time.Since(start).Truncate(time.Millisecond)
+	// Compute elapsed once to provide consistent values for truncated display and rate calculation
+	elapsedFull := time.Since(start)
+	elapsed := elapsedFull.Truncate(time.Millisecond)
 	unique := make(map[string]struct{})
 	for _, d := range discovered {
 		if d.ServiceType != "" {
@@ -106,7 +108,7 @@ func buildSummary(discovered []Service, stats DiscoveryStats, start time.Time) R
 		}
 	}
 	inst := len(discovered)
-	elapsedSec := time.Since(start).Seconds()
+	elapsedSec := elapsedFull.Seconds()
 	rate := 0.0
 	if elapsedSec > 0 {
 		rate = float64(inst) / elapsedSec
