@@ -107,14 +107,12 @@ func buildSummary(discovered []Service, stats DiscoveryStats, start time.Time) R
 	}
 }
 
-func discover(name string, outputFields []string, printResults bool, timeout time.Duration, debug bool) ([]Service, error) {
+func discover(name string, outputFields []string, selectedFields map[string]struct{}, printResults bool, timeout time.Duration, debug bool) ([]Service, error) {
 	nresults := 0
 	resolver, err := zeroconf.NewResolver(nil)
 	if err != nil {
 		return nil, fmt.Errorf("%w: %v", errResolverInit, err)
 	}
-
-	outputFields, selectedFields := normalizeOutputFields(outputFields)
 
 	if debug && printResults {
 		fmt.Printf("Showing: ")
@@ -192,7 +190,7 @@ func discover(name string, outputFields []string, printResults bool, timeout tim
 }
 
 // DiscoverAll concurrently discovers across multiple service names
-func discoverAll(serviceNames []string, outputFields []string, printResults bool, outputMode OutputMode, timeout time.Duration, debug bool) ([]Service, DiscoveryStats, error) {
+func discoverAll(serviceNames []string, outputFields []string, selectedFields map[string]struct{}, printResults bool, outputMode OutputMode, timeout time.Duration, debug bool) ([]Service, DiscoveryStats, error) {
 	// Guard empty services list
 	if len(serviceNames) == 0 {
 		return nil, DiscoveryStats{}, errNoServicesConfigured
@@ -212,15 +210,13 @@ func discoverAll(serviceNames []string, outputFields []string, printResults bool
 			sem <- struct{}{}
 			defer wg.Done()
 			defer func() { <-sem }()
-			res, err := discover(svc, outputFields, false, timeout, debug)
+			res, err := discover(svc, outputFields, selectedFields, false, timeout, debug)
 			ch <- batch{services: res, err: err, name: svc}
 		}()
 	}
 	go func() { wg.Wait(); close(ch) }()
 	seen := make(map[string]struct{})
 	count := 0
-	var selectedFields map[string]struct{}
-	outputFields, selectedFields = normalizeOutputFields(outputFields)
 	var discovered []Service
 	stats := DiscoveryStats{ServiceTypeCounts: make(map[string]int)}
 	stats.Attempts = len(serviceNames)
@@ -663,10 +659,13 @@ func main() {
 		}
 	}
 
+	// Normalize output fields once and reuse
+	outputFields, selectedFields := normalizeOutputFields(outputFields)
+
 	var discovered []Service
 	stats := DiscoveryStats{}
 	if serviceFilter != "" {
-		res, err := discover(serviceFilter, outputFields, printResults, effectiveTimeout, debug)
+		res, err := discover(serviceFilter, outputFields, selectedFields, printResults, effectiveTimeout, debug)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: discover %s: %v\n", serviceFilter, err)
 			// Classify exit code
@@ -682,7 +681,7 @@ func main() {
 		}
 		discovered = append(discovered, res...)
 	} else {
-		res, st, err := discoverAll(services[:], outputFields, printResults, outputMode, effectiveTimeout, debug)
+		res, st, err := discoverAll(services[:], outputFields, selectedFields, printResults, outputMode, effectiveTimeout, debug)
 		if err != nil {
 			if errors.Is(err, errNoServicesConfigured) {
 				fmt.Fprintln(os.Stderr, "No built-in services available (services list empty) — rebuild may be required")
