@@ -464,6 +464,11 @@ func main() {
 			err      error
 			name     string
 		}
+		if len(services) == 0 {
+
+			fmt.Fprintln(os.Stderr, "No built-in services available (services list empty) — rebuild may be required")
+			exit(exitUsage)
+		}
 		ch := make(chan batch, len(services))
 		wg := sync.WaitGroup{}
 		sem := make(chan struct{}, maxConcurrentDiscover)
