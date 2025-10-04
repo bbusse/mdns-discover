@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/grandcat/zeroconf"
@@ -17,8 +18,6 @@ const (
 	exitErr   = 1
 	exitUsage = 2
 )
-
-var suppressPrint bool
 
 // OutputMode represents how results should be emitted
 type OutputMode int
@@ -41,7 +40,7 @@ func buildKey(host, addr string, port int) string {
 	return host + "|" + addr + "|" + fmt.Sprint(port)
 }
 
-func discover(name string, outputFields []string) ([]Service, error) {
+func discover(name string, outputFields []string, printResults bool) ([]Service, error) {
 	debug := false
 	if os.Getenv("MDNS_DEBUG") == "1" || strings.ToLower(os.Getenv("MDNS_DEBUG")) == "true" {
 		debug = true
@@ -64,7 +63,7 @@ func discover(name string, outputFields []string) ([]Service, error) {
 		}
 	}
 
-	if debug && !suppressPrint {
+	if debug && printResults {
 		fmt.Printf("Showing: ")
 		for _, f := range outputFields {
 			fmt.Printf("%s ", f)
@@ -133,7 +132,7 @@ func discover(name string, outputFields []string) ([]Service, error) {
 				if _, ok := selectedFields["text"]; ok && joinedTXT != "" {
 					parts = append(parts, joinedTXT)
 				}
-				if !suppressPrint {
+				if printResults {
 					fmt.Println(strings.Join(parts, " "))
 				}
 				collected = append(collected, Service{Hostname: host, Address: addrStr, Port: port, Text: joinedTXT})
@@ -183,6 +182,7 @@ func main() {
 	fieldFilter := os.Getenv("MDNS_FIELD_FILTER")
 	var outputFields []string
 	outputMode := OutputText
+	printResults := true
 
 	// Minimal flag scan for --output[=]<mode>
 	filteredArgs := []string{os.Args[0]}
@@ -190,7 +190,7 @@ func main() {
 		a := os.Args[i]
 		if strings.HasPrefix(a, "--output") {
 			mode := ""
-			if a == "--output" { // value may be next arg
+			if a == "--output" {
 				if i+1 < len(os.Args) {
 					mode = os.Args[i+1]
 					i++ // consume next
@@ -210,7 +210,7 @@ func main() {
 				outputMode = OutputText
 			case "json":
 				outputMode = OutputJSON
-				suppressPrint = true
+				printResults = false
 			default:
 				fmt.Fprintf(os.Stderr, "Unknown output mode: %s (expected text or json)\n", mode)
 				help(progname, version)
@@ -256,25 +256,82 @@ func main() {
 
 	var discovered []Service
 	if "" != serviceFilter {
-		res, err := discover(serviceFilter, outputFields)
+		res, err := discover(serviceFilter, outputFields, printResults)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: discover %s: %v\n", serviceFilter, err)
 			os.Exit(exitErr)
 		}
 		discovered = append(discovered, res...)
 	} else {
+		type batch struct {
+			services []Service
+			err      error
+			name     string
+		}
+		ch := make(chan batch, len(services))
+		wg := sync.WaitGroup{}
 		for _, s := range services {
-			res, err := discover(s, outputFields)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "warn: discover %s: %v\n", s, err)
+			svc := s
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				res, err := discover(svc, outputFields, false)
+				ch <- batch{services: res, err: err, name: svc}
+			}()
+		}
+		go func() { wg.Wait(); close(ch) }()
+
+		seen := make(map[string]struct{})
+		count := 0
+		selectedFields := make(map[string]struct{})
+
+		if len(outputFields) == 0 {
+			outputFields = append(outputFields, "count", "hostname", "address", "port", "text")
+		}
+
+		for _, f := range outputFields {
+			f = strings.TrimSpace(f)
+			if f != "" {
+				selectedFields[f] = struct{}{}
+			}
+		}
+		for b := range ch {
+			if b.err != nil {
+				fmt.Fprintf(os.Stderr, "warn: discover %s: %v\n", b.name, b.err)
 				continue
 			}
-			discovered = append(discovered, res...)
+			for _, srv := range b.services {
+				key := buildKey(srv.Hostname, srv.Address, srv.Port)
+				if _, ok := seen[key]; ok {
+					continue
+				}
+				seen[key] = struct{}{}
+				count++
+				if printResults && outputMode == OutputText {
+					parts := []string{}
+					if _, ok := selectedFields["count"]; ok {
+						parts = append(parts, fmt.Sprintf("%d", count))
+					}
+					if _, ok := selectedFields["hostname"]; ok {
+						parts = append(parts, srv.Hostname)
+					}
+					if _, ok := selectedFields["address"]; ok {
+						parts = append(parts, srv.Address)
+					}
+					if _, ok := selectedFields["port"]; ok {
+						parts = append(parts, fmt.Sprintf("%d", srv.Port))
+					}
+					if _, ok := selectedFields["text"]; ok && srv.Text != "" {
+						parts = append(parts, srv.Text)
+					}
+					fmt.Println(strings.Join(parts, " "))
+				}
+				discovered = append(discovered, srv)
+			}
 		}
 	}
 
 	if outputMode == OutputJSON {
-		// ensure we suppress printing (already set earlier if needed)
 		data, err := json.MarshalIndent(discovered, "", "  ")
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: marshal json: %v\n", err)
