@@ -6,6 +6,25 @@ mDNS Service Discovery
 $ go install github.com/bbusse/mdns-discover@latest
 ```
 
+### From source with man page
+```
+$ git clone https://github.com/bbusse/mdns-discover
+$ cd mdns-discover
+# Build binary and install man page (uses PREFIX, DESTDIR)
+$ make install
+```
+Default PREFIX is /usr/local. Override:
+```
+$ make install PREFIX=$HOME/.local
+```
+(or set DESTDIR for packaging: `make install DESTDIR=/tmp/pkgroot`)
+
+After install, validate:
+```
+$ which mdns-discover
+$ man mdns-discover
+```
+
 ## Usage
 ### Show help
 ```
@@ -106,6 +125,13 @@ $ go build
 | 0 | Success |
 | 1 | Runtime error (discovery or internal failure) |
 | 2 | Usage error (invalid flags / arguments) |
+
+### Man page
+A machine-generated mdoc man page can be emitted with:
+```
+$ mdns-discover --man
+```
+This uses the same metadata source as the interactive help.
 
 ## Resources
 [mDNS Wikipedia](https://en.wikipedia.org/wiki/Multicast_DNS)  
