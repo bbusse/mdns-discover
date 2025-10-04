@@ -83,7 +83,6 @@ func discover(name string, output_filter []string) ([]Service, error) {
 			}
 		}
 	}
-	return collected, nil
 }
 
 func contains(list []string, element string) bool {
