@@ -1,16 +1,30 @@
+// SPDX-License-Identifier: BSD-3-Clause
+//
+// mdns-discover
+//
+// Copyright (c) 2023-2025 Björn Busse
+// Author: Björn Busse
+// Contributors:
+//
+// This source code is licensed under the BSD 3-Clause License found in the
+// LICENSE file in the root directory of this source tree.
 package main
 
 import (
 	"context"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/grandcat/zeroconf"
+
+	"github.com/bbusse/mdns-discover/internal/docmeta"
 )
 
 const defaultTimeout = 15 * time.Second
@@ -223,24 +237,164 @@ func discover(name string, outputFields []string, printResults bool) ([]Service,
 }
 
 func help(name string, version string) {
-	fmt.Printf("\n%s version: %s\n\n", name, version)
-	fmt.Printf(" Usage:\n\n")
-	fmt.Printf("  mdns-discover                             - Show all discovered devices\n\n")
-	fmt.Printf("  mdns-discover help                        - Show usage\n\n")
-	fmt.Printf("  mdns-discover --output=json               - Output all discovered devices as JSON array\n\n")
-	fmt.Printf("  MDNS_SERVICE_FILTER=\"_workstation._tcp\" \\\n")
-	fmt.Printf("  mdns-discover                             - Show filtered devices\n\n")
-	fmt.Printf("  mdns-discover show-fields \"hostname, address\"    - Show specified attributes for all discovered devices\n\n")
-	fmt.Printf("  MDNS_SERVICE_FILTER=\"_workstation._tcp\" \\\n")
-	fmt.Printf("  mdns-discover show-fields \"hostname, address\"    - Show specified attributes for filtered devices\n\n")
-	fmt.Printf("  Environment variables:\n")
-	fmt.Printf("    MDNS_SERVICE_FILTER   - Restrict to a single service type\n")
-	fmt.Printf("    MDNS_FIELD_FILTER     - Comma list of fields (count, service, hostname, address, port, text)\n")
-	fmt.Printf("    MDNS_TIMEOUT          - Duration (e.g. 10s, 30s, 1m)\n")
-	fmt.Printf("    MDNS_DEBUG            - Set to 1 / true for verbose discovery debug\n\n")
-	fmt.Printf("  Flags:\n")
-	fmt.Printf("    --output=text|json    - Select output format (default text)\n")
-	fmt.Printf("    --concurrency <n>     - Limit simultaneous discovery goroutines (env: MDNS_CONCURRENCY)\n\n")
+	// Header
+	fmt.Printf("%s v%s - mDNS service discovery utility\n", name, version)
+	fmt.Printf("Usage: %s [flags] [subcommand]\n\n", name)
+
+	// Commands (static for now)
+	fmt.Println("Commands:")
+	fmt.Printf("  help                  Show this help text\n")
+	fmt.Printf("  show-fields \"a,b,c\"   Limit output to specified comma-separated fields\n\n")
+
+	// Flags sourced from doc metadata
+	fmt.Println("Flags:")
+	// make deterministic ordering
+	finfos := docmeta.FlagInfos()
+	sort.Slice(finfos, func(i, j int) bool { return finfos[i].Name < finfos[j].Name })
+	for _, f := range finfos {
+		// Compose flag syntax like --name<ValueSyntax> aligning descriptions
+		syn := "--" + f.Name + f.ValueSyntax
+		envPart := ""
+		if f.Env != "" {
+			envPart = fmt.Sprintf(" (env: %s)", f.Env)
+		}
+		defPart := ""
+		if f.Default != "" {
+			defPart = fmt.Sprintf(" (default: %s)", f.Default)
+		}
+		fmt.Printf("  %-20s %s%s%s\n", syn, f.Description, defPart, envPart)
+	}
+	fmt.Println()
+
+	// Environment variables section (excluding ones already tied directly to flags for clarity)
+	fmt.Println("Environment:")
+	einfos := docmeta.EnvInfos()
+	sort.Slice(einfos, func(i, j int) bool { return einfos[i].Name < einfos[j].Name })
+	for _, e := range einfos {
+		fmt.Printf("  %-22s %s\n", e.Name, e.Description)
+	}
+	fmt.Println()
+
+	// Fields
+	fmt.Println("Fields:")
+	allowed := docmeta.AllowedFields()
+	sort.Strings(allowed)
+	fmt.Printf("  Allowed: %s\n", strings.Join(allowed, ", "))
+	fmt.Printf("  Unknown field names are ignored\n\n")
+
+	// Output modes (derived from flag metadata for output if present)
+	fmt.Println("Output modes:")
+	fmt.Println("  text  One line per discovered (service + address).")
+	fmt.Println("  json  Single JSON array (all results).")
+	fmt.Println()
+
+	// Examples
+	fmt.Println("Examples:")
+	exs := docmeta.Examples()
+	for _, ex := range exs {
+		if ex.Command == "mdns-discover" { // ensure uses actual program name
+			ex.Command = name
+		}
+		// Replace leading canonical command if present
+		if strings.HasPrefix(ex.Command, "mdns-discover ") {
+			ex.Command = name + " " + strings.TrimPrefix(ex.Command, "mdns-discover ")
+		}
+		fmt.Printf("  %-45s %s\n", ex.Command, ex.Description)
+	}
+	fmt.Println()
+
+	// Exit codes
+	fmt.Println("Exit codes:")
+	xcodes := docmeta.ExitCodes()
+	sort.Slice(xcodes, func(i, j int) bool { return xcodes[i].Code < xcodes[j].Code })
+	for _, x := range xcodes {
+		fmt.Printf("  %-3d %s\n", x.Code, x.Meaning)
+	}
+	fmt.Println()
+}
+
+// generateManPage produces an mdoc (BSD-style) man page as a string using docmeta metadata.
+// Sections: NAME, SYNOPSIS, DESCRIPTION, FLAGS, ENVIRONMENT, FIELDS, OUTPUT MODES, EXAMPLES, EXIT STATUS
+func generateManPage(name, version string) string {
+	var b strings.Builder
+	date := time.Now().Format("2006-01-02")
+	b.WriteString(".Dd " + date + "\n")
+	b.WriteString(".Dt " + strings.ToUpper(name) + " 1\n")
+	b.WriteString(".Os mdns-discover\n")
+	b.WriteString(".Sh NAME\n")
+	// Use hyphen in NAME section; mdoc interprets '-' fine, escape not needed.
+	b.WriteString(name + " - mDNS service discovery utility\n")
+	b.WriteString(".Sh SYNOPSIS\n")
+	b.WriteString(".Nm " + name + "\n")
+	b.WriteString(".Op Fl -output Ns =text|json\n")
+	b.WriteString(".Op Fl -timeout Ns =30s\n")
+	b.WriteString(".Op Fl -concurrency Ar n\n")
+	b.WriteString(".Op Fl h | Fl -help | Fl -man\n")
+	b.WriteString(".Op Ar subcommand\n")
+	b.WriteString(".Sh DESCRIPTION\n")
+	b.WriteString(".Nm performs multicast DNS (mDNS / DNS-SD) discovery across a curated list of service types or an optionally restricted single service. Results can be emitted as plain text lines or a JSON array.\n")
+
+	// FLAGS
+	b.WriteString(".Sh FLAGS\n")
+	finfos := docmeta.FlagInfos()
+	sort.Slice(finfos, func(i, j int) bool { return finfos[i].Name < finfos[j].Name })
+	for _, f := range finfos {
+		syn := "--" + f.Name + f.ValueSyntax
+		b.WriteString(".It Fl " + syn + "\n")
+		parts := []string{f.Description}
+		if f.Default != "" {
+			parts = append(parts, "default: "+f.Default)
+		}
+		if f.Env != "" {
+			parts = append(parts, "env: "+f.Env)
+		}
+		b.WriteString(strings.Join(parts, "; ") + "\n")
+	}
+
+	// ENVIRONMENT
+	b.WriteString(".Sh ENVIRONMENT\n")
+	einfos := docmeta.EnvInfos()
+	sort.Slice(einfos, func(i, j int) bool { return einfos[i].Name < einfos[j].Name })
+	for _, e := range einfos {
+		b.WriteString(".It Ev " + e.Name + "\n" + e.Description + "\n")
+	}
+
+	// FIELDS
+	b.WriteString(".Sh FIELDS\n")
+	allowed := docmeta.AllowedFields()
+	sort.Strings(allowed)
+	b.WriteString("Allowed output fields: " + strings.Join(allowed, ", ") + ". Unknown names are ignored.\n")
+
+	// OUTPUT MODES
+	b.WriteString(".Sh OUTPUT MODES\n")
+	b.WriteString("text: One line per discovered service instance (fields space-separated).\n")
+	b.WriteString("json: Single JSON array containing all discovered services.\n")
+
+	// EXAMPLES
+	b.WriteString(".Sh EXAMPLES\n")
+	exs := docmeta.Examples()
+	for _, ex := range exs {
+		cmd := ex.Command
+		if cmd == "mdns-discover" {
+			cmd = name
+		} else if strings.HasPrefix(cmd, "mdns-discover ") {
+			cmd = name + " " + strings.TrimPrefix(cmd, "mdns-discover ")
+		}
+		b.WriteString(".It \n" + cmd + "\n" + ex.Description + "\n")
+	}
+
+	// EXIT STATUS
+	b.WriteString(".Sh EXIT STATUS\n")
+	xcodes := docmeta.ExitCodes()
+	sort.Slice(xcodes, func(i, j int) bool { return xcodes[i].Code < xcodes[j].Code })
+	for _, x := range xcodes {
+		b.WriteString(fmt.Sprintf(".It %d %s\n", x.Code, x.Meaning))
+	}
+
+	b.WriteString(".Sh VERSION\n" + version + "\n")
+	b.WriteString(".Sh SOURCE\nProject page: https://github.com/bbusse/mdns-discover\n")
+	b.WriteString(".Sh SEE ALSO\nmulticast DNS (mDNS), DNS-SD specifications\n")
+	return b.String()
 }
 
 func main() {
@@ -252,96 +406,105 @@ func main() {
 	outputMode := OutputText
 	printResults := true
 
-	// Optional concurrency override via environment variable
+	// Establish defaults (env may override defaults; flags override env)
+	defaultConcurrency := maxConcurrentDiscover
 	if v := os.Getenv("MDNS_CONCURRENCY"); v != "" {
 		if n, err := strconv.Atoi(strings.TrimSpace(v)); err == nil && n > 0 {
-			maxConcurrentDiscover = n
+			defaultConcurrency = n
 		}
 	}
 
-	// Minimal flag scan for --output[=]<mode>
-	filteredArgs := []string{os.Args[0]}
-	for i := 1; i < len(os.Args); i++ {
-		a := os.Args[i]
-		if strings.HasPrefix(a, "--output") {
-			mode := ""
-			if a == "--output" {
-				if i+1 < len(os.Args) {
-					mode = os.Args[i+1]
-					// Consume next argument value
-					i++
-				} else {
-					fmt.Fprintf(os.Stderr, "--output flag requires a value (text or json)\n")
-					exit(exitUsage)
-				}
-			} else if strings.HasPrefix(a, "--output=") {
-				mode = strings.TrimPrefix(a, "--output=")
-			} else {
-				// Partial match like --output: treat as error
-				fmt.Fprintf(os.Stderr, "Unrecognized flag form: %s\n", a)
-				exit(exitUsage)
-			}
-			mode = strings.ToLower(strings.TrimSpace(mode))
-			switch mode {
-			case "text", "":
-				outputMode = OutputText
-			case "json":
-				outputMode = OutputJSON
-				printResults = false
-			default:
-				fmt.Fprintf(os.Stderr, "Unknown output mode: %s (expected text or json)\n", mode)
-				help(progname, version)
-				exit(exitUsage)
-			}
-			continue
-		} else if strings.HasPrefix(a, "--concurrency") {
-			val := ""
-			if a == "--concurrency" {
-				if i+1 < len(os.Args) {
-					val = os.Args[i+1]
-					i++
-				} else {
-					fmt.Fprintf(os.Stderr, "--concurrency flag requires a value (positive integer)\n")
-					exit(exitUsage)
-				}
-			} else if strings.HasPrefix(a, "--concurrency=") {
-				val = strings.TrimPrefix(a, "--concurrency=")
-			}
-			val = strings.TrimSpace(val)
-			if n, err := strconv.Atoi(val); err == nil && n > 0 {
-				maxConcurrentDiscover = n
-			} else {
-				fmt.Fprintf(os.Stderr, "Invalid --concurrency value: %s\n", val)
-				exit(exitUsage)
-			}
-			continue
-		}
-		filteredArgs = append(filteredArgs, a)
-	}
-	os.Args = filteredArgs
+	var outputModeStr string
+	var wantHelp bool
+	var wantMan bool
+	var concurrency int
+	var timeoutFlag string
 
-	if len(os.Args) > 1 {
-		if os.Args[1] == "help" {
+	fs := flag.NewFlagSet(progname, flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	fs.Usage = func() {
+		help(progname, version)
+	}
+	fs.StringVar(&outputModeStr, "output", "text", "Output format: text or json")
+	fs.BoolVar(&wantHelp, "h", false, "Show help and exit")
+	fs.BoolVar(&wantHelp, "help", false, "Show help and exit")
+	fs.BoolVar(&wantMan, "man", false, "Output man page (mdoc) to stdout and exit")
+	fs.IntVar(&concurrency, "concurrency", defaultConcurrency, "Simultaneous discovery goroutines (env MDNS_CONCURRENCY)")
+	fs.StringVar(&timeoutFlag, "timeout", "", "Discovery timeout (e.g. 10s, 30s, 1m) overrides env MDNS_TIMEOUT")
+
+	if err := fs.Parse(os.Args[1:]); err != nil {
+		// flag package already prints an error; show concise usage
+		fs.Usage()
+		exit(exitUsage)
+	}
+
+	if wantHelp {
+		help(progname, version)
+		exit(exitOK)
+	}
+	if wantMan {
+		fmt.Print(generateManPage(progname, version))
+		exit(exitOK)
+	}
+
+	// Apply parsed flag values
+	switch strings.ToLower(strings.TrimSpace(outputModeStr)) {
+	case "text", "":
+		outputMode = OutputText
+	case "json":
+		outputMode = OutputJSON
+		printResults = false
+	default:
+		fmt.Fprintf(os.Stderr, "Unknown --output value: %s (expected text or json)\n", outputModeStr)
+		fs.Usage()
+		exit(exitUsage)
+	}
+	if concurrency > 0 {
+		maxConcurrentDiscover = concurrency
+	} else {
+		fmt.Fprintf(os.Stderr, "Invalid --concurrency value: %d (must be > 0)\n", concurrency)
+		fs.Usage()
+		exit(exitUsage)
+	}
+
+	// If timeout flag provided, set environment override chain by exporting value into local var used later
+	if timeoutFlag != "" {
+		if _, err := time.ParseDuration(timeoutFlag); err != nil {
+			fmt.Fprintf(os.Stderr, "Invalid --timeout value: %s\n", timeoutFlag)
+			fs.Usage()
+			exit(exitUsage)
+		}
+		// Set MDNS_TIMEOUT env only for this process so existing discovery code path picks it up.
+		os.Setenv("MDNS_TIMEOUT", timeoutFlag)
+	}
+
+	// Remaining args (subcommands)
+	args := fs.Args()
+
+	if len(args) > 0 {
+		if args[0] == "help" {
 			help(progname, version)
 			exit(exitOK)
-		} else if os.Args[1] == "show-fields" {
-			if len(os.Args) == 2 {
+		} else if args[0] == "man" {
+			fmt.Print(generateManPage(progname, version))
+			exit(exitOK)
+		} else if args[0] == "show-fields" {
+			if len(args) == 1 {
 				fmt.Fprintf(os.Stderr, "Missing output filter. Please specify what to output with \"show-fields\"\n")
 				help(progname, version)
 				exit(exitUsage)
 			}
-			for _, v := range strings.Split(os.Args[2], ",") {
+			for _, v := range strings.Split(args[1], ",") {
 				outputFields = append(outputFields, strings.TrimSpace(v))
 			}
-			// Unexpected extra args after show-fields spec
-			if len(os.Args) > 3 {
-				fmt.Fprintf(os.Stderr, "Unexpected extra arguments: %v\n", os.Args[3:])
+			if len(args) > 2 {
+				fmt.Fprintf(os.Stderr, "Unexpected extra arguments: %v\n", args[2:])
 				help(progname, version)
 				exit(exitUsage)
 			}
 		} else {
 			// Unknown subcommand
-			fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
+			fmt.Fprintf(os.Stderr, "Unknown command: %s\n", args[0])
 			help(progname, version)
 			exit(exitUsage)
 		}
