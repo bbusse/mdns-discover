@@ -17,18 +17,17 @@ type Service struct {
 	Hostname string `json:"hostname"`
 	Address  string `json:"address"`
 	Port     int    `json:"port"`
-	Text     string `json:"text"`
+	Text     string `json:"text"` // Joined TXT records
 }
 
-func discover(services []Service, name string, output_filter []string) {
+func discover(name string, output_filter []string) ([]Service, error) {
 	debug := false
 	nresults := 0
 	resolver, err := zeroconf.NewResolver(nil)
 	if err != nil {
-		log.Fatalln("Failed to initialize resolver:", err.Error())
+		return nil, fmt.Errorf("init resolver: %w", err)
 	}
 
-	// Set default output fields if no output_filter given
 	if len(output_filter) == 0 {
 		output_filter = append(output_filter, "count", "hostname", "address", "port", "text")
 	}
@@ -42,10 +41,28 @@ func discover(services []Service, name string, output_filter []string) {
 	}
 
 	entries := make(chan *zeroconf.ServiceEntry)
-	go func(results <-chan *zeroconf.ServiceEntry) {
-		for entry := range results {
-			for _, addr := range entry.AddrIPv4 {
+	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
+	defer cancel()
+
+	if err = resolver.Browse(ctx, name, "local.", entries); err != nil {
+		return nil, fmt.Errorf("browse: %w", err)
+	}
+
+	var collected []Service
+	for {
+		select {
+		case <-ctx.Done():
+			return collected, nil
+		case entry, ok := <-entries:
+			if !ok {
+				return collected, nil
+			}
+			for _, addr := range entry.AddrIPv4 { // IPv4 only for now
 				nresults++
+				joinedTXT := ""
+				if len(entry.Text) > 0 {
+					joinedTXT = strings.Join(entry.Text, ";")
+				}
 				if contains(output_filter, "count") {
 					fmt.Printf("%d ", nresults)
 				}
@@ -58,29 +75,15 @@ func discover(services []Service, name string, output_filter []string) {
 				if contains(output_filter, "port") {
 					fmt.Printf("%d ", entry.Port)
 				}
-				if contains(output_filter, "text") && (len(entry.Text) > 0) {
-					fmt.Printf("%s ", entry.Text)
+				if contains(output_filter, "text") && joinedTXT != "" {
+					fmt.Printf("%s ", joinedTXT)
 				}
 				fmt.Println()
-				service_data := Service{Hostname: entry.HostName,
-					Address: fmt.Sprintf("%s", addr),
-					Port:    entry.Port,
-					Text:    fmt.Sprintf("%s", entry.Text)}
-				services = append(services, service_data)
+				collected = append(collected, Service{Hostname: entry.HostName, Address: addr.String(), Port: entry.Port, Text: joinedTXT})
 			}
 		}
-	}(entries)
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second*15)
-	defer cancel()
-	err = resolver.Browse(ctx, name, "local.", entries)
-	if err != nil {
-		log.Fatalln("Failed to browse:", err.Error())
 	}
-
-	fmt.Printf("%v", entries)
-
-	<-ctx.Done()
+	return collected, nil
 }
 
 func contains(list []string, element string) bool {
@@ -138,14 +141,21 @@ func main() {
 		}
 	}
 
-	var discovered_services []Service
-
+	var discovered []Service
 	if "" != service_filter {
-		discover(discovered_services, service_filter, output_filter)
-		os.Exit(0)
+		res, err := discover(service_filter, output_filter)
+		if err != nil {
+			log.Fatalln(err)
+		}
+		discovered = append(discovered, res...)
+		return
 	}
-
-	for _, service_filter := range services {
-		discover(discovered_services, service_filter, output_filter)
+	for _, s := range services {
+		res, err := discover(s, output_filter)
+		if err != nil {
+			log.Printf("error discovering %s: %v", s, err)
+			continue
+		}
+		discovered = append(discovered, res...)
 	}
 }
