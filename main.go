@@ -159,7 +159,7 @@ func parseTXT(txt []string) (string, map[string]string) {
 	return joined, m
 }
 
-func discover(name string, outputFields []string, printResults bool) ([]Service, error) {
+func discover(name string, outputFields []string, printResults bool, timeout time.Duration) ([]Service, error) {
 	debug := false
 	if os.Getenv("MDNS_DEBUG") == "1" || strings.ToLower(os.Getenv("MDNS_DEBUG")) == "true" {
 		debug = true
@@ -181,15 +181,6 @@ func discover(name string, outputFields []string, printResults bool) ([]Service,
 	}
 
 	entries := make(chan *zeroconf.ServiceEntry)
-	// Allow overriding timeout via MDNS_TIMEOUT (e.g. 30s, 2m), default to defaultTimeout
-	timeout := defaultTimeout
-	if tv := os.Getenv("MDNS_TIMEOUT"); tv != "" {
-		if d, err := time.ParseDuration(tv); err == nil {
-			timeout = d
-		} else {
-			fmt.Fprintf(os.Stderr, "warning: invalid MDNS_TIMEOUT '%s' (using default %s)\n", tv, timeout)
-		}
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
@@ -302,7 +293,7 @@ func help(name string, version string) {
 	fmt.Printf("  Allowed: %s\n", strings.Join(allowed, ", "))
 	fmt.Printf("  Unknown field names are ignored\n\n")
 
-	// Output modes (derived from flag metadata for output if present)
+	// Output modes
 	fmt.Println("Output modes:")
 	fmt.Println("  text  One line per discovered (service + address).")
 	fmt.Println("  json  Single JSON array (all results).")
@@ -312,7 +303,7 @@ func help(name string, version string) {
 	fmt.Println("Examples:")
 	exs := docmeta.Examples()
 	for _, ex := range exs {
-		if ex.Command == "mdns-discover" { // ensure uses actual program name
+		if ex.Command == "mdns-discover" {
 			ex.Command = name
 		}
 		// Replace leading canonical command if present
@@ -439,6 +430,7 @@ func main() {
 	var wantMan bool
 	var concurrency int
 	var timeoutFlag string
+	var effectiveTimeout time.Duration
 
 	fs := flag.NewFlagSet(progname, flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
@@ -488,14 +480,23 @@ func main() {
 	}
 
 	// If timeout flag provided, set environment override chain by exporting value into local var used later
+	// Determine effective timeout (flag > env > default)
+	effectiveTimeout = defaultTimeout
+	if envTO := os.Getenv("MDNS_TIMEOUT"); envTO != "" {
+		if d, err := time.ParseDuration(envTO); err == nil {
+			effectiveTimeout = d
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: invalid MDNS_TIMEOUT '%s' (using default %s)\n", envTO, effectiveTimeout)
+		}
+	}
 	if timeoutFlag != "" {
-		if _, err := time.ParseDuration(timeoutFlag); err != nil {
+		if d, err := time.ParseDuration(timeoutFlag); err == nil {
+			effectiveTimeout = d
+		} else {
 			fmt.Fprintf(os.Stderr, "Invalid --timeout value: %s\n", timeoutFlag)
 			fs.Usage()
 			exit(exitUsage)
 		}
-		// Set MDNS_TIMEOUT env only for this process so existing discovery code path picks it up.
-		os.Setenv("MDNS_TIMEOUT", timeoutFlag)
 	}
 
 	// Remaining args (subcommands)
@@ -539,7 +540,7 @@ func main() {
 
 	var discovered []Service
 	if serviceFilter != "" {
-		res, err := discover(serviceFilter, outputFields, printResults)
+		res, err := discover(serviceFilter, outputFields, printResults, effectiveTimeout)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: discover %s: %v\n", serviceFilter, err)
 			// Classify exit code
@@ -570,7 +571,7 @@ func main() {
 				sem <- struct{}{}
 				defer wg.Done()
 				defer func() { <-sem }()
-				res, err := discover(svc, outputFields, false)
+				res, err := discover(svc, outputFields, false, effectiveTimeout)
 				ch <- batch{services: res, err: err, name: svc}
 			}()
 		}
