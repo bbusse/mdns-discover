@@ -12,6 +12,11 @@ import (
 )
 
 const defaultTimeout = 15 * time.Second
+const (
+	exitOK    = 0
+	exitErr   = 1
+	exitUsage = 2
+)
 
 //go:generate go run gen/gen_services.go
 
@@ -23,7 +28,6 @@ type Service struct {
 }
 
 func discover(name string, output_filter []string) ([]Service, error) {
-	// debug now controlled via env MDNS_DEBUG
 	debug := false
 	if os.Getenv("MDNS_DEBUG") == "1" || strings.ToLower(os.Getenv("MDNS_DEBUG")) == "true" {
 		debug = true
@@ -60,6 +64,8 @@ func discover(name string, output_filter []string) ([]Service, error) {
 	if tv := os.Getenv("MDNS_TIMEOUT"); tv != "" {
 		if d, err := time.ParseDuration(tv); err == nil {
 			timeout = d
+		} else {
+			fmt.Fprintf(os.Stderr, "warning: invalid MDNS_TIMEOUT '%s' (using default %s)\n", tv, timeout)
 		}
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
@@ -74,9 +80,19 @@ func discover(name string, output_filter []string) ([]Service, error) {
 	for {
 		select {
 		case <-ctx.Done():
+			if debug {
+				if ctx.Err() == context.DeadlineExceeded {
+					fmt.Fprintf(os.Stderr, "debug: discovery for %s timed out after %s (%d results)\n", name, timeout, len(collected))
+				} else {
+					fmt.Fprintf(os.Stderr, "debug: discovery for %s context done (%d results)\n", name, len(collected))
+				}
+			}
 			return collected, nil
 		case entry, ok := <-entries:
 			if !ok {
+				if debug {
+					fmt.Fprintf(os.Stderr, "debug: discovery channel closed for %s (%d results)\n", name, len(collected))
+				}
 				return collected, nil
 			}
 
@@ -150,16 +166,25 @@ func main() {
 	if len(os.Args) > 1 {
 		if "help" == os.Args[1] {
 			help(progname, version)
-			os.Exit(0)
+			os.Exit(exitOK)
 		} else if "show-fields" == os.Args[1] {
 			if len(os.Args) == 2 {
-				fmt.Printf("Missing output filter. Please specify what to output with \"show-fields\"\n")
+				fmt.Fprintf(os.Stderr, "Missing output filter. Please specify what to output with \"show-fields\"\n")
 				help(progname, version)
-				os.Exit(1)
+				os.Exit(exitUsage)
 			}
 			for _, v := range strings.Split(os.Args[2], ",") {
 				output_filter = append(output_filter, strings.TrimSpace(v))
 			}
+			if len(os.Args) > 3 { // unexpected extra args after show-fields spec
+				fmt.Fprintf(os.Stderr, "Unexpected extra arguments: %v\n", os.Args[3:])
+				help(progname, version)
+				os.Exit(exitUsage)
+			}
+		} else { // unknown subcommand
+			fmt.Fprintf(os.Stderr, "Unknown command: %s\n", os.Args[1])
+			help(progname, version)
+			os.Exit(exitUsage)
 		}
 	}
 
