@@ -1,0 +1,40 @@
+name: FreeBSD Build
+
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+    branches:
+      - '**'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+jobs:
+  build-freebsd:
+    runs-on: ubuntu-latest
+    name: FreeBSD Build
+    steps:
+      - uses: actions/checkout@v4
+      - name: FreeBSD Build
+        uses: vmactions/freebsd-vm@v1.1.8
+        id: build
+        with:
+          usesh: true
+          prepare: |
+            pkg install -y curl go
+
+          run: |
+            freebsd-version
+            pwd
+            ls -lah
+            go build
+            tar -cJvf mdns-discover-freebsd-amd64-latest.tar.xz mdns-discover
+            ls -lah
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mdns-discover-freebsd-amd64-latest.tar.xz
+          path: mdns-discover-freebsd-amd64-latest.tar.xz
