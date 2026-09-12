@@ -1,11 +1,12 @@
 ARG GO_VERSION=1.25
+ARG IMAGE_VERSION=edge
+
 FROM golang:${GO_VERSION}-alpine AS build
 
 WORKDIR /src
 COPY . .
 RUN CGO_ENABLED=0 go build -o /out/mdns-discover .
 
-ARG IMAGE_VERSION=edge
 FROM alpine:${IMAGE_VERSION}
 LABEL maintainer="Björn Busse <bj.rn@baerlin.eu>"
 LABEL org.opencontainers.image.source=https://github.com/bbusse/mdns-discover
