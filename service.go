@@ -6,6 +6,15 @@ import (
 	"strings"
 )
 
+// RawEntry holds optional raw data extracted from zeroconf.ServiceEntry (only when requested)
+type RawEntry struct {
+	Instance string   `json:"instance,omitempty"`
+	Domain   string   `json:"domain,omitempty"`
+	IfIndex  int      `json:"ifIndex,omitempty"`
+	TTL      uint32   `json:"ttl,omitempty"`
+	Texts    []string `json:"txt,omitempty"`
+}
+
 // Service describes a discovered service instance.
 type Service struct {
 	ServiceType string            `json:"service,omitempty"`
@@ -14,10 +23,12 @@ type Service struct {
 	Port        int               `json:"port"`
 	Text        string            `json:"text"`
 	TxtMap      map[string]string `json:"txtMap,omitempty"`
+	Family      string            `json:"family,omitempty"`
+	Raw         *RawEntry         `json:"raw,omitempty"`
 }
 
 // BuildOutputLine constructs a space separated line for the selected fields in a fixed order
-func buildOutputLine(selectedFields map[string]struct{}, seq int, serviceName, host, addr string, port int, txt string) string {
+func buildOutputLine(selectedFields map[string]struct{}, seq int, serviceName, host, addr string, port int, txt, family string) string {
 	parts := []string{}
 	if _, ok := selectedFields["count"]; ok {
 		parts = append(parts, fmt.Sprintf("%d", seq))
@@ -36,6 +47,9 @@ func buildOutputLine(selectedFields map[string]struct{}, seq int, serviceName, h
 	}
 	if _, ok := selectedFields["text"]; ok && txt != "" {
 		parts = append(parts, txt)
+	}
+	if _, ok := selectedFields["family"]; ok {
+		parts = append(parts, family)
 	}
 	return strings.Join(parts, " ")
 }

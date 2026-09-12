@@ -34,10 +34,11 @@ type ExitCode struct {
 var flagInfos = []FlagInfo{
 	{Name: "output", ValueSyntax: "=text|json", Default: "text", Env: "", Description: "Output format"},
 	{Name: "timeout", ValueSyntax: "=30s", Default: "15s", Env: "MDNS_TIMEOUT", Description: "Discovery timeout"},
-	{Name: "concurrency", ValueSyntax: "<n>", Default: "10", Env: "MDNS_CONCURRENCY", Description: "Simultaneous lookups"},
+	{Name: "concurrency", ValueSyntax: "<n>", Default: "10", Env: "MDNS_CONCURRENCY", Description: "Deprecated, no effect (single-socket discovery)"},
 	{Name: "debug", ValueSyntax: "", Default: "false", Env: "MDNS_DEBUG", Description: "Verbose debug output"},
 	{Name: "summary", ValueSyntax: "", Default: "false", Env: "", Description: "Print summary (show all service types with counts)"},
 	{Name: "no-color", ValueSyntax: "", Default: "false", Env: "", Description: "Disable ANSI color in summary"},
+	{Name: "interface", ValueSyntax: "=<name>[,name2]", Default: "", Env: "MDNS_INTERFACE", Description: "Limit discovery to one or more network interfaces"},
 }
 
 var envInfos = []EnvInfo{
@@ -45,7 +46,8 @@ var envInfos = []EnvInfo{
 	{Name: "MDNS_FIELD_FILTER", Description: "Comma list of fields (overridden by show-fields)"},
 	{Name: "MDNS_TIMEOUT", Description: "Discovery timeout (duration string)"},
 	{Name: "MDNS_DEBUG", Description: "Verbose debug output (1 / true)"},
-	{Name: "MDNS_CONCURRENCY", Description: "Max concurrent service lookups"},
+	{Name: "MDNS_CONCURRENCY", Description: "Deprecated, no effect (kept for compatibility)"},
+	{Name: "MDNS_INTERFACE", Description: "Limit discovery to one or more comma-separated interface names (e.g. en0,eth0)"},
 }
 
 var examples = []Example{
@@ -53,7 +55,7 @@ var examples = []Example{
 	{Command: "mdns-discover --output=json", Description: "JSON array output"},
 	{Command: "MDNS_SERVICE_FILTER=\"_workstation._tcp\" mdns-discover", Description: "Filter to a specific service"},
 	{Command: "mdns-discover show-fields \"hostname,address,port\"", Description: "Limit output columns"},
-	{Command: "MDNS_TIMEOUT=30s mdns-discover --concurrency=5", Description: "Override timeout and concurrency"},
+	{Command: "MDNS_TIMEOUT=30s mdns-discover --interface=en0", Description: "Override timeout and limit to one interface"},
 }
 
 var exitCodes = []ExitCode{
@@ -65,7 +67,7 @@ var exitCodes = []ExitCode{
 	{Code: 5, Meaning: "Timed out with zero results"},
 }
 
-var allowedFields = []string{"count", "service", "hostname", "address", "port", "text"}
+var allowedFields = []string{"count", "service", "hostname", "address", "port", "text", "family", "raw"}
 
 // Exported accessors keep internal slices immutable to callers.
 func FlagInfos() []FlagInfo   { return append([]FlagInfo(nil), flagInfos...) }
