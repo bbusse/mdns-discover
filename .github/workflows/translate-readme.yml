@@ -1,0 +1,35 @@
+name: Translate README
+
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+    branches:
+      - '**'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+
+jobs:
+  translate:
+    name: google-translate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Read file content
+        id: read_file
+        run: |
+          FILE_CONTENT="$(cat README.md)"
+          echo 'file_content="${FILE_CONTENT}"' >> $GITHUB_ENV
+      - uses: fabasoad/translation-action@main
+        id: google
+        with:
+          provider: google
+          lang: en-de
+          source: ${{ env.file_content }}
+      - name: Print the result
+        run: |
+          echo "Translation:\n'${{ steps.google.outputs.text }}'\n"
+          echo "Original text:\n'${{ env.file_content }}'"
+        shell: sh

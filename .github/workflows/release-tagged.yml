@@ -1,0 +1,51 @@
+name: Release tagged artifacts
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+
+    - name: Wait for FreeBSD build
+      uses: lewagon/wait-on-check-action@v1.3.4
+      with:
+        ref: ${{ github.ref }}
+        check-name: 'FreeBSD Build'
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        wait-interval: 10
+
+    - name: Wait for Linux builds
+      uses: lewagon/wait-on-check-action@v1.3.4
+      with:
+        ref: ${{ github.ref }}
+        check-name: 'extract-and-release'
+        repo-token: ${{ secrets.GITHUB_TOKEN }}
+        wait-interval: 10
+
+    - name: Download FreeBSD artifact
+      id: download-freebsd-artifact
+      uses: dawidd6/action-download-artifact@v8
+      with:
+        workflow: freebsd-build.yml
+
+    - name: Download Linux artifacts
+      id: download-linux-artifacts
+      uses: dawidd6/action-download-artifact@v8
+      with:
+        workflow: container-extract-artifact.yml
+
+    - name: Release
+      uses: "marvinpinto/action-automatic-releases@latest"
+      with:
+        title: mdns-discover
+        repo_token: "${{ secrets.GITHUB_TOKEN }}"
+        prerelease: false
+        files: |
+          mdns-discover-freebsd-amd64-latest.tar.xz
+          mdns-discover-linux-arm64-latest.tar.xz
+          mdns-discover-linux-amd64-latest.tar.xz
+          mdns-discover-linux-i386-latest.tar.xz
