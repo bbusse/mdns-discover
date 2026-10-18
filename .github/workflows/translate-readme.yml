@@ -1,0 +1,94 @@
+name: Translate README
+
+on:
+  push:
+    paths:
+      - README.md
+      - .github/workflows/translate-readme.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  translate:
+    name: google-translate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Translate README
+        env:
+          SOURCE: README.md
+          TARGET: README.de.md
+          FROM: en
+          TO: de
+        run: |
+          set -euo pipefail
+          work="$RUNNER_TEMP/translate"
+          mkdir -p "$work/code"
+
+          # Google rewrites backticks and translates identifiers, so fenced blocks
+          # and inline code go out as XQZ<n>XQZ, which it leaves alone
+          awk -v dir="$work/code" '
+              BEGIN { n = 0 }
+              function stash(s,    f) {
+                  f = dir "/" n
+                  printf "%s", s >f
+                  close(f)
+                  return "XQZ" n++ "XQZ"
+              }
+              /^```/ && !fence { fence = 1; block = $0; next }
+              /^```/ { fence = 0; print stash(block "\n" $0); next }
+              fence { block = block "\n" $0; next }
+              {
+                  out = ""
+                  line = $0
+                  while (match(line, /`[^`]+`/)) {
+                      out = out substr(line, 1, RSTART - 1) stash(substr(line, RSTART, RLENGTH))
+                      line = substr(line, RSTART + RLENGTH)
+                  }
+                  print out line
+              }
+              END { if (fence) print stash(block) }
+          ' "$SOURCE" >"$work/in.md"
+
+          # The endpoint the action used as well. POST, because a 14 KB README is
+          # far past what fits in a query string
+          curl -fsS --retry 3 -X POST \
+              "https://translate.googleapis.com/translate_a/single?client=gtx&dt=t&sl=$FROM&tl=$TO" \
+              --data-urlencode "q@$work/in.md" |
+              jq -r '[.[0][][0]] | join("")' >"$work/out.md"
+
+          awk -v dir="$work/code" '
+              {
+                  out = ""
+                  line = $0
+                  while (match(line, /XQZ[0-9]+XQZ/)) {
+                      f = dir "/" substr(line, RSTART + 3, RLENGTH - 6)
+                      s = ""
+                      k = 0
+                      while ((getline l <f) > 0) s = s (k++ ? "\n" : "") l
+                      close(f)
+                      out = out substr(line, 1, RSTART - 1) s
+                      line = substr(line, RSTART + RLENGTH)
+                      restored++
+                  }
+                  print out line
+              }
+              END { print restored + 0 >"/dev/stderr" }
+          ' "$work/out.md" >"$TARGET" 2>"$work/restored"
+
+          stashed="$(find "$work/code" -type f | wc -l | tr -d ' ')"
+          if [ "$(cat "$work/restored")" -ne "$stashed" ]; then
+              echo "::error::translation dropped code placeholders: $(cat "$work/restored") of $stashed restored" >&2
+              exit 1
+          fi
+          wc -c "$SOURCE" "$TARGET"
+
+      - name: Upload translation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: README.de.md
+          path: README.de.md
+          if-no-files-found: error
