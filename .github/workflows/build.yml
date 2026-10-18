@@ -1,0 +1,66 @@
+---
+name: Build and Release
+
+on:
+  push:
+    paths-ignore:
+      - '**.md'
+    branches:
+      - '**'
+  pull_request:
+    paths-ignore:
+      - '**.md'
+    branches:
+      - '**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  container-build-push:
+    name: Build and push container
+    permissions:
+      contents: read
+      packages: write
+    uses: bbusse/github-workflows/.github/workflows/container-build-push.yml@dev
+    with:
+      image_name: mdns-discover
+      image_repository: ghcr.io/bbusse
+      container_registry: ghcr
+      container_push_to_registry: true
+
+  build-go-pkg-linux:
+    name: Build Linux binaries
+    uses: bbusse/github-workflows/.github/workflows/build-go-pkg-linux.yml@dev
+    with:
+      artifact_name: mdns-discover
+
+  build-go-pkg-macos:
+    name: Build macOS binary
+    uses: bbusse/github-workflows/.github/workflows/build-go-pkg-macos.yml@dev
+    with:
+      artifact_name: mdns-discover
+
+  build-go-pkg-freebsd:
+    name: Build FreeBSD binary
+    uses: bbusse/github-workflows/.github/workflows/build-go-pkg-freebsd.yml@dev
+    with:
+      artifact_name: mdns-discover
+
+  release:
+    name: Release
+    needs:
+      - build-go-pkg-linux
+      - build-go-pkg-macos
+      - build-go-pkg-freebsd
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/ci' }}
+    permissions:
+      contents: write
+    uses: bbusse/github-workflows/.github/workflows/release.yml@dev
+    with:
+      artifact_name: mdns-discover
+      binary_name: mdns-discover
+      release_branch: ci
+      always_release: true
+    secrets: inherit

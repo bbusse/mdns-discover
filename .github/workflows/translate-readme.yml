@@ -1,0 +1,48 @@
+name: Translate README
+
+on:
+  push:
+    paths:
+      - README.md
+      - .github/workflows/translate-readme.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  translate:
+    name: google-translate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      # source takes a path, so the README goes in as a file. Passing its
+      # text through GITHUB_ENV breaks on the first newline
+      - uses: fabasoad/translation-action@43a711f7512787f0aacb6f48833c9d383791bb9e # v4.2.8
+        id: google
+        with:
+          provider: google
+          # The google provider wants source|target, en-de is rejected
+          lang: en|de
+          source: README.md
+
+      # Through env, the translated markdown is data rather than shell code
+      - name: Write translation
+        env:
+          TEXT: ${{ steps.google.outputs.text }}
+        run: |
+          set -eu
+          if [ -z "$TEXT" ]; then
+              echo "::error::translation came back empty" >&2
+              exit 1
+          fi
+          printf '%s\n' "$TEXT" >README.de.md
+          wc -c README.md README.de.md
+
+      - name: Upload translation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: README.de.md
+          path: README.de.md
+          if-no-files-found: error
